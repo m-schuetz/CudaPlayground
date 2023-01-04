@@ -1,0 +1,36 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="..\src\main.cpp" />
+    <ClCompile Include="..\include\unsuck_platform_specific.cpp">
+      <Filter>source</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\include\unsuck.hpp">
+      <Filter>source</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="source">
+      <UniqueIdentifier>{651d2ed3-853f-4f6a-be44-dd3081acc780}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="headers">
+      <UniqueIdentifier>{6f062ce5-ad70-48c3-a47b-efec6e18e88d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="cuda code">
+      <UniqueIdentifier>{0dd2eef0-48ea-4652-bc0f-b58b488d234e}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\modules\randomNumbers\randomNumbers.cu">
+      <Filter>cuda code</Filter>
+    </None>
+    <None Include="..\modules\randomNumbers\utils.cu">
+      <Filter>cuda code</Filter>
+    </None>
+    <None Include="..\modules\randomNumbers\utils.h.cu">
+      <Filter>cuda code</Filter>
+    </None>
+  </ItemGroup>
+</Project>
