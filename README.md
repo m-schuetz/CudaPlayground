@@ -1,7 +1,10 @@
 
 # CUDA Playground
 
+
 This project provides a basic template of a cuda program that can be <b>modified and executed at runtime</b> by saving the cuda kernel file (with ctrl+s). It's meant to help with developing algorithms by providing a near-instant feedback loop. 
+
+![gif](./docs/cuda_playground.gif)
 
 * [randomNumbers.cu](./modules/randomNumbers/randomNumbers.cu) is the example cuda kernel that simply generates random numbers and then computes the average.
 * It exploits some interesting and useful CUDA functionality such as:
