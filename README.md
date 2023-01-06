@@ -25,7 +25,7 @@ Draws a parametric plane and sphere into a custom cuda framebuffer, and then tra
 * stores the closest samples by using atomicMin with a 64 bit value that contains both, depth and color.
 * Then extracts the color values from the interleaved depth&color buffer, and stores the result in an OpenGL texture,
 
-![jpeg](./docs/rasterize.jpg)
+![jpeg](./docs/cuda_rasterize.gif)
 
 ## CUDA Seascape
 
