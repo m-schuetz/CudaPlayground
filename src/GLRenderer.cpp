@@ -39,6 +39,10 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 }
 
 static void cursor_position_callback(GLFWwindow* window, double xpos, double ypos){
+	ImGuiIO& io = ImGui::GetIO();
+	if(io.WantCaptureMouse){
+		return;
+	}
 	
 	Runtime::mousePosition = {xpos, ypos};
 
@@ -46,6 +50,10 @@ static void cursor_position_callback(GLFWwindow* window, double xpos, double ypo
 }
 
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset){
+	ImGuiIO& io = ImGui::GetIO();
+	if(io.WantCaptureMouse){
+		return;
+	}
 
 	_controls->onMouseScroll(xoffset, yoffset);
 }
@@ -58,6 +66,16 @@ void drop_callback(GLFWwindow* window, int count, const char **paths){
 }
 
 void mouse_button_callback(GLFWwindow* window, int button, int action, int mods){
+
+	// cout << "start button: " << button << ", action: " << action << ", mods: " << mods << endl;
+
+	ImGuiIO& io = ImGui::GetIO();
+	if(io.WantCaptureMouse){
+		return;
+	}
+
+	// cout << "end button: " << button << ", action: " << action << ", mods: " << mods << endl;
+
 
 	if(action == 1){
 		Runtime::mouseButtons = Runtime::mouseButtons | (1 << button);
@@ -159,6 +177,16 @@ void GLRenderer::init(){
 	glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
 	glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_HIGH, 0, NULL, GL_TRUE);
 	glDebugMessageCallback(debugCallback, NULL);
+
+	{ // SETUP IMGUI
+		IMGUI_CHECKVERSION();
+		ImGui::CreateContext();
+		ImPlot::CreateContext();
+		ImGuiIO& io = ImGui::GetIO();
+		ImGui_ImplGlfw_InitForOpenGL(window, true);
+		ImGui_ImplOpenGL3_Init("#version 450");
+		ImGui::StyleColorsDark();
+	}
 }
 
 shared_ptr<Texture> GLRenderer::createTexture(int width, int height, GLuint colorType) {
@@ -249,7 +277,60 @@ void GLRenderer::loop(function<void(void)> update, function<void(void)> render){
 			0, 0, 0 + source->width, 0 + source->height,
 			GL_COLOR_BUFFER_BIT, GL_LINEAR);
 
-		// FINISH FRAME
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		glViewport(0, 0, this->width, this->height);
+
+		// IMGUI
+		ImGui_ImplOpenGL3_NewFrame();
+		ImGui_ImplGlfw_NewFrame();
+		ImGui::NewFrame();
+		auto windowSize_perf = ImVec2(490, 260);
+
+		{ // RENDER IMGUI PERFORMANCE WINDOW
+
+			stringstream ssFPS; 
+			ssFPS << this->fps;
+			string strFps = ssFPS.str();
+
+			ImGui::SetNextWindowPos(ImVec2(10, 10));
+			ImGui::SetNextWindowSize(windowSize_perf);
+
+			ImGui::Begin("Performance");
+			ImGui::Text((rightPad("FPS:", 30) + strFps).c_str());
+
+			static float history = 2.0f;
+			static ScrollingBuffer sFrames;
+			static ScrollingBuffer s60fps;
+			static ScrollingBuffer s120fps;
+			float t = now();
+
+			sFrames.AddPoint(t, 1000.0f * timeSinceLastFrame);
+
+			// sFrames.AddPoint(t, 1000.0f * timeSinceLastFrame);
+			s60fps.AddPoint(t, 1000.0f / 60.0f);
+			s120fps.AddPoint(t, 1000.0f / 120.0f);
+			static ImPlotAxisFlags rt_axis = ImPlotAxisFlags_NoTickLabels;
+			ImPlot::SetNextPlotLimitsX(t - history, t, ImGuiCond_Always);
+			ImPlot::SetNextPlotLimitsY(0, 30, ImGuiCond_Always);
+
+			if (ImPlot::BeginPlot("Timings", nullptr, nullptr, ImVec2(-1, 200))){
+
+				auto x = &sFrames.Data[0].x;
+				auto y = &sFrames.Data[0].y;
+				ImPlot::PlotShaded("frame time(ms)", x, y, sFrames.Data.size(), -Infinity, sFrames.Offset, 2 * sizeof(float));
+
+				ImPlot::PlotLine("16.6ms (60 FPS)", &s60fps.Data[0].x, &s60fps.Data[0].y, s60fps.Data.size(), s60fps.Offset, 2 * sizeof(float));
+				ImPlot::PlotLine(" 8.3ms (120 FPS)", &s120fps.Data[0].x, &s120fps.Data[0].y, s120fps.Data.size(), s120fps.Offset, 2 * sizeof(float));
+
+				ImPlot::EndPlot();
+			}
+
+			ImGui::End();
+		}
+
+		ImGui::Render();
+		ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
 
 		glfwSwapBuffers(window);
 		glfwPollEvents();

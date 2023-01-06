@@ -147,8 +147,8 @@ void initCudaProgram(shared_ptr<GLRenderer> renderer){
 
 	cuda_program = new CudaModularProgram({
 		.modules = {
-			"./modules/sphere/sphere.cu",
-			"./modules/sphere/utils.cu",
+			"./modules/rasterize/rasterize.cu",
+			"./modules/rasterize/utils.cu",
 		},
 		.kernels = {"kernel"}
 	});

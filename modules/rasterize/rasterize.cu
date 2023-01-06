@@ -48,7 +48,7 @@ void kernel(
 	grid.sync();
 
 	// draw plane
-	int cells = 2'000;
+	int cells = 2000;
 	processRange(0, cells * cells, [&](int index){
 		int ux = index % cells;
 		int uy = index / cells;
@@ -79,14 +79,22 @@ void kernel(
 		if(x > 1 && x < uniforms.width  - 2.0)
 		if(y > 1 && y < uniforms.height - 2.0){
 
-			for(int ox : {-2, -1, 0, 1, 2})
-			for(int oy : {-2, -1, 0, 1, 2}){
-				uint32_t pixelID = (x + ox) + int(uniforms.width) * (y + oy);
-				uint64_t udepth = *((uint32_t*)&depth);
-				uint64_t encoded = (udepth << 32) | color;
+			// SINGLE PIXEL
+			uint32_t pixelID = x + int(uniforms.width) * y;
+			uint64_t udepth = *((uint32_t*)&depth);
+			uint64_t encoded = (udepth << 32) | color;
 
-				atomicMin(&framebuffer[pixelID], encoded);
-			}
+			atomicMin(&framebuffer[pixelID], encoded);
+
+			// POINT SPRITE
+			// for(int ox : {-2, -1, 0, 1, 2})
+			// for(int oy : {-2, -1, 0, 1, 2}){
+			// 	uint32_t pixelID = (x + ox) + int(uniforms.width) * (y + oy);
+			// 	uint64_t udepth = *((uint32_t*)&depth);
+			// 	uint64_t encoded = (udepth << 32) | color;
+
+			// 	atomicMin(&framebuffer[pixelID], encoded);
+			// }
 		}
 	});
 

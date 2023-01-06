@@ -2,34 +2,79 @@
 # CUDA Playground
 
 
-This project provides a basic template of a cuda program that can be <b>modified and executed at runtime</b> by saving the cuda kernel file (with ctrl+s). It's meant to help with developing algorithms by providing a near-instant feedback loop. 
+This project provides basic templates of a cuda programs that can be <b>modified and executed at runtime</b> by saving the cuda kernel file (with ctrl+s). It's meant to help with developing algorithms by providing a near-instant feedback loop. 
+
+Three example programs are provided, one using the console and two using OpenGL interop to draw an image with CUDA and display the resulting image with OpenGL.
+
+## Random Numbers
+
+Kernel: [randomNumbers.cu](./modules/randomNumbers/randomNumbers.cu)
+
+Generates a list of random numbers and then computes the average value. Results are printed directly by the CUDA kernel. Cooperative groups, specifically ```grid.sync()```, are used to sync all GPU threads between different passes.
 
 ![gif](./docs/cuda_playground.gif)
 
-* [randomNumbers.cu](./modules/randomNumbers/randomNumbers.cu) is the example cuda kernel that simply generates random numbers and then computes the average.
-* It exploits some interesting and useful CUDA functionality such as:
-	* cooperative groups, which enables you to globally sync all GPU threads via ```grid.sync()```. This, in turn, allows you to write megakernels where you can fuse all your kernels into one single large megakernel. If one pass depends on the results of another, you simply add grid.sync() to make sure all threads finished working on the first pass. 
-	* CUDA runtime API which allows compiling CUDA code at runtime. 
-	* It does not spawn threads/blocks based on the number of items that need to be processed, it spawns as many blocks as CUDA recommends for a given kernel code and workgroup size. It is up to you to make sure that a workload of X elements is processed with only Y blocks. Although a little more complex, it's essential if you have multiple passes with different workload sizes. 
-	* However, the ```processRange(start, size, lambda)``` utility function helps you by calling function ```lambda``` exactly ```size``` times with respective indices. 
-	```
-	// distributes <numElements> calls to the given lambda function to all GPU threads. 
-	processRange(0, numElements, [&](int index){
-		atomicAdd(&sum, elements[index]);
-	});
-	```
-	* To avoid the need to adjust bindings between host and device (and recompilation of C++ host code), all buffers and counters are allocated directly in the CUDA program. The host only passes a simple byte buffer, and the device code allocates within that buffer. For example, to allocate an array of ```numElements``` integers, call:
-	```
-	uint32_t* randomValues = allocator.alloc<uint32_t*>(numElements * sizeof(uint32_t));
-	```
-	Note that _all_ threads need to do the same allocations in the same order, as each thread keeps track of its own offsets into the buffer. All threads need to agree on the same offsets. 
-	You can also use this to allocate new counter variables at runtime, e.g.:
-	```
-	uint64_t& counter = *allocator.alloc<uint64_t*>(8);
-	if(grid.thread_rank() == 0){
-		counter = 0;
-	}
-	grid.sync();
-	atomicAdd(&counter, 1);
-	```
-* ```"--gpu-architecture=compute_75"``` is hardcoded in CudaModularProgram.h. You may want to change this to access newer features. 
+## CUDA Rasterizer
+
+Kernel: [rasterize.cu](./modules/rasterize/rasterize.cu)
+
+Draws a parametric plane and sphere into a custom cuda framebuffer, and then transfers the result into an OpenGL texture. At each frame, the kernel 
+* allocates a framebuffer from a byte buffer
+* clears it with infinite depth and a background value
+* samples points on the surface, projects them to pixels
+* stores the closest samples by using atomicMin with a 64 bit value that contains both, depth and color.
+* Then extracts the color values from the interleaved depth&color buffer, and stores the result in an OpenGL texture,
+
+![jpeg](./docs/rasterize.jpg)
+
+## CUDA Seascape
+
+Kernel: [seascape.cu](./modules/seascape/seascape.cu)
+
+A CUDA port of the shadertoy demo ["Seascape"](https://www.shadertoy.com/view/Ms2SD1) (from Alexander Alekseev aka TDM). Instead of projecting points to pixels as the rasterizer does, this demo traces rays from pixels to compute a randering of an ocean.
+
+![jpeg](./docs/seascape.jpg)
+
+
+## Getting Started
+
+* Open build/CudaPlayground.sln in Visual Studio 2022
+* Specify your desired startup project by right clicking and selecting "Set as startup project".
+* Press ctrl+f5 to compile and run the project
+* Open the respective cuda file (randomNumbers.cu, rasterize.cu, seascape.cu) and try to change some code. Changes are instantly applied by saving the file. 
+
+## Notes
+
+* ```"--gpu-architecture=compute_75"``` is hardcoded in [CudaModularProgram.h](./include/CudaModularProgram.h). You may want to change this to access newer features. 
+
+
+## Citing
+
+This project extracts a minimal viable cuda framework from our research on software rasterization of point clouds (see github project [compute_rasterizer](https://github.com/m-schuetz/compute_rasterizer)).
+
+```
+@article{SCHUETZ-2022-PCC,
+  title =      "Software Rasterization of 2 Billion Points in Real Time",
+  author =     "Markus Sch\"{u}tz and Bernhard Kerbl and Michael Wimmer",
+  year =       "2022",
+  month =      jul,
+  journal =    "Proc. ACM Comput. Graph. Interact. Tech.",
+  volume =     "5",
+  pages =      "1--16",
+  URL =        "https://www.cg.tuwien.ac.at/research/publications/2022/SCHUETZ-2022-PCC/",
+}
+
+@article{SCHUETZ-2021-PCC,
+  title =      "Rendering Point Clouds with Compute Shaders and Vertex Order Optimization",
+  author =     "Markus Sch\"{u}tz and Bernhard Kerbl and Michael Wimmer",
+  year =       "2021",
+  month =      jul,
+  doi =        "10.1111/cgf.14345",
+  journal =    "Computer Graphics Forum",
+  number =     "4",
+  volume =     "40",
+  pages =      "115--126",
+  keywords =   "point-based rendering, compute shader, real-time rendering",
+  URL =        "https://www.cg.tuwien.ac.at/research/publications/2021/SCHUETZ-2021-PCC/",
+}
+```

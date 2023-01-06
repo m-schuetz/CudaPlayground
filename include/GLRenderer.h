@@ -8,6 +8,12 @@
 #include "GL\glew.h"
 #include "GLFW\glfw3.h"
 
+#include "imgui.h"
+#include "imgui_impl_opengl3.h"
+#include "imgui_impl_glfw.h"
+#include "implot.h"
+#include "implot_internal.h"
+
 #include "glm/common.hpp"
 #include "glm/matrix.hpp"
 #include <glm/gtx/transform.hpp>
@@ -21,6 +27,34 @@ using glm::dvec4;
 using glm::dmat4;
 
 struct GLRenderer;
+
+// ScrollingBuffer from ImPlot implot_demo.cpp.
+// MIT License
+// url: https://github.com/epezent/implot
+struct ScrollingBuffer {
+	int MaxSize;
+	int Offset;
+	ImVector<ImVec2> Data;
+	ScrollingBuffer() {
+		MaxSize = 2000;
+		Offset = 0;
+		Data.reserve(MaxSize);
+	}
+	void AddPoint(float x, float y) {
+		if (Data.size() < MaxSize)
+			Data.push_back(ImVec2(x, y));
+		else {
+			Data[Offset] = ImVec2(x, y);
+			Offset = (Offset + 1) % MaxSize;
+		}
+	}
+	void Erase() {
+		if (Data.size() > 0) {
+			Data.shrink(0);
+			Offset = 0;
+		}
+	}
+};
 
 struct GLBuffer{
 

@@ -23,6 +23,7 @@
     <ProjectGuid>{6E98D902-2BE0-4AB8-97B8-1EBD66E95CA5}</ProjectGuid>
     <RootNamespace>CudaPlayground</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>Cuda_Console</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">

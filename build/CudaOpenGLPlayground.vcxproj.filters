@@ -1,0 +1,80 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="..\libs\imgui\backends\imgui_impl_glfw.cpp">
+      <Filter>imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\libs\imgui\backends\imgui_impl_opengl3.cpp">
+      <Filter>imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\libs\imgui\imgui.cpp">
+      <Filter>imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\libs\imgui\imgui_draw.cpp">
+      <Filter>imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\libs\imgui\imgui_tables.cpp">
+      <Filter>imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\libs\imgui\imgui_widgets.cpp">
+      <Filter>imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\libs\implot\implot.cpp">
+      <Filter>imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\libs\implot\implot_items.cpp">
+      <Filter>imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\include\unsuck_platform_specific.cpp">
+      <Filter>stuff</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\GLRenderer.cpp">
+      <Filter>stuff</Filter>
+    </ClCompile>
+    <ClCompile Include="..\libs\glew\glew.c">
+      <Filter>stuff</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\libs\imgui\backends\imgui_impl_glfw.h">
+      <Filter>imgui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\libs\imgui\backends\imgui_impl_opengl3.h">
+      <Filter>imgui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\libs\imgui\imgui.h">
+      <Filter>imgui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\libs\implot\implot.h">
+      <Filter>imgui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\libs\implot\implot_internal.h">
+      <Filter>imgui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\include\unsuck.hpp">
+      <Filter>stuff</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\modules\randomNumbers\utils.h.cu">
+      <Filter>cuda</Filter>
+    </None>
+    <None Include="..\modules\randomNumbers\utils.cu">
+      <Filter>cuda</Filter>
+    </None>
+    <None Include="..\modules\seascape\seascape.cu">
+      <Filter>cuda</Filter>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="imgui">
+      <UniqueIdentifier>{6a94b3c5-d9dd-4be2-b8ea-0c128262af1d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="stuff">
+      <UniqueIdentifier>{f016380b-a9e5-48c7-91d3-c369db799aee}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="cuda">
+      <UniqueIdentifier>{f05efe76-876d-4d64-a69a-67d602b60190}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>
