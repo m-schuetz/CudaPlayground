@@ -3,11 +3,13 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.32014.148
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "CudaPlayground", "CudaPlayground.vcxproj", "{6E98D902-2BE0-4AB8-97B8-1EBD66E95CA5}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Cuda_Console", "CudaPlayground.vcxproj", "{6E98D902-2BE0-4AB8-97B8-1EBD66E95CA5}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "CudaOpenGLPlayground", "CudaOpenGLPlayground.vcxproj", "{CF0B0CE0-ED14-4016-8097-05772406DC73}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Cuda_OpenGL_Seascape", "CudaOpenGLPlayground.vcxproj", "{CF0B0CE0-ED14-4016-8097-05772406DC73}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "CudaOpenGL_Sphere", "CudaOpenGL_Sphere.vcxproj", "{ED9E3C8A-4FF2-4DC7-A110-4B4A82427231}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Cuda_OpenGL_Rasterizer", "CudaOpenGL_Rasterize.vcxproj", "{ED9E3C8A-4FF2-4DC7-A110-4B4A82427231}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Cuda_OpenGL_RasterizeTriangles", "CudaOpenGL_RasterizeTriangles.vcxproj", "{508E3265-48C6-4BE9-9522-3343FFF3A1BA}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -69,6 +71,22 @@ Global
 		{ED9E3C8A-4FF2-4DC7-A110-4B4A82427231}.RelWithDebInfo|x64.Build.0 = Release|x64
 		{ED9E3C8A-4FF2-4DC7-A110-4B4A82427231}.RelWithDebInfo|x86.ActiveCfg = Release|Win32
 		{ED9E3C8A-4FF2-4DC7-A110-4B4A82427231}.RelWithDebInfo|x86.Build.0 = Release|Win32
+		{508E3265-48C6-4BE9-9522-3343FFF3A1BA}.Debug|x64.ActiveCfg = Debug|x64
+		{508E3265-48C6-4BE9-9522-3343FFF3A1BA}.Debug|x64.Build.0 = Debug|x64
+		{508E3265-48C6-4BE9-9522-3343FFF3A1BA}.Debug|x86.ActiveCfg = Debug|Win32
+		{508E3265-48C6-4BE9-9522-3343FFF3A1BA}.Debug|x86.Build.0 = Debug|Win32
+		{508E3265-48C6-4BE9-9522-3343FFF3A1BA}.MinSizeRel|x64.ActiveCfg = Debug|x64
+		{508E3265-48C6-4BE9-9522-3343FFF3A1BA}.MinSizeRel|x64.Build.0 = Debug|x64
+		{508E3265-48C6-4BE9-9522-3343FFF3A1BA}.MinSizeRel|x86.ActiveCfg = Debug|Win32
+		{508E3265-48C6-4BE9-9522-3343FFF3A1BA}.MinSizeRel|x86.Build.0 = Debug|Win32
+		{508E3265-48C6-4BE9-9522-3343FFF3A1BA}.Release|x64.ActiveCfg = Release|x64
+		{508E3265-48C6-4BE9-9522-3343FFF3A1BA}.Release|x64.Build.0 = Release|x64
+		{508E3265-48C6-4BE9-9522-3343FFF3A1BA}.Release|x86.ActiveCfg = Release|Win32
+		{508E3265-48C6-4BE9-9522-3343FFF3A1BA}.Release|x86.Build.0 = Release|Win32
+		{508E3265-48C6-4BE9-9522-3343FFF3A1BA}.RelWithDebInfo|x64.ActiveCfg = Release|x64
+		{508E3265-48C6-4BE9-9522-3343FFF3A1BA}.RelWithDebInfo|x64.Build.0 = Release|x64
+		{508E3265-48C6-4BE9-9522-3343FFF3A1BA}.RelWithDebInfo|x86.ActiveCfg = Release|Win32
+		{508E3265-48C6-4BE9-9522-3343FFF3A1BA}.RelWithDebInfo|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
