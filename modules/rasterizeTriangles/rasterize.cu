@@ -10,6 +10,7 @@ namespace cg = cooperative_groups;
 
 Uniforms uniforms;
 Allocator* allocator;
+uint64_t nanotime_start;
 
 constexpr float PI = 3.1415;
 
@@ -22,34 +23,8 @@ float4 operator*(const mat4& a, const float4& b){
 	);
 }
 
-struct Point{
-	float x;
-	float y;
-	float z;
-	unsigned int color;
-};
-
-struct Points{
-	unsigned int count;
-	unsigned int instanceCount;
-	unsigned int first;
-	unsigned int baseInstance;
-	Point points[10'000'000];
-};
-
-struct Lines{
-	unsigned int count;
-	unsigned int instanceCount;
-	unsigned int first;
-	unsigned int baseInstance;
-	Point vertices[10'000'000];
-};
-
 struct Triangles{
-	int count;
-	unsigned int instanceCount;
-	unsigned int first;
-	unsigned int baseInstance;
+	int numTriangles;
 	float3* positions;
 	float2* uvs;
 	uint32_t* colors;
@@ -61,10 +36,66 @@ struct Texture{
 	uint32_t* data;
 };
 
-void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, Texture* texture = nullptr){
+struct RasterizationSettings{
+	Texture* texture = nullptr;
+	int colorMode = COLORMODE_TRIANGLE_ID;
+};
+
+uint32_t sample_nearest(float2 uv, Texture* texture){
+	int tx = int(uv.x * texture->width) % texture->width;
+	int ty = int(uv.y * texture->height) % texture->height;
+	ty = texture->height - ty;
+
+	int texelIndex = tx + texture->width * ty;
+	uint32_t texel = texture->data[texelIndex];
+
+	return texel;
+}
+
+uint32_t sample_linear(float2 uv, Texture* texture){
+	float width = texture->width;
+	float height = texture->height;
+
+	float tx = uv.x * width;
+	float ty = height - uv.y * height;
+
+	int x0 = clamp(floor(tx), 0.0f, width - 1.0f);
+	int x1 = clamp(ceil(tx) , 0.0f, width - 1.0f);
+	int y0 = clamp(floor(ty), 0.0f, height - 1.0f);
+	int y1 = clamp(ceil(ty) , 0.0f, height - 1.0f);
+	float wx = tx - floor(tx);
+	float wy = ty - floor(ty);
+
+	float w00 = (1.0 - wx) * (1.0 - wy);
+	float w10 = wx * (1.0 - wy);
+	float w01 = (1.0 - wx) * wy;
+	float w11 = wx * wy;
+
+	uint8_t* c00 = (uint8_t*)&texture->data[x0 + y0 * texture->width];
+	uint8_t* c10 = (uint8_t*)&texture->data[x1 + y0 * texture->width];
+	uint8_t* c01 = (uint8_t*)&texture->data[x0 + y1 * texture->width];
+	uint8_t* c11 = (uint8_t*)&texture->data[x1 + y1 * texture->width];
+
+	uint32_t color;
+	uint8_t* rgb = (uint8_t*)&color;
+
+	rgb[0] = c00[0] * w00 + c10[0] * w10 + c01[0] * w01 + c11[0] * w11;
+	rgb[1] = c00[1] * w00 + c10[1] * w10 + c01[1] * w01 + c11[1] * w11;
+	rgb[2] = c00[2] * w00 + c10[2] * w10 + c01[2] * w01 + c11[2] * w11;
+
+	return color;
+}
+
+// rasterizes triangles in a block-wise fashion
+// - each block grabs a triangle
+// - all threads of that block process different fragments of the triangle
+void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, RasterizationSettings settings){
 
 	auto grid = cg::this_grid();
 	auto block = cg::this_thread_block();
+
+	Texture* texture = settings.texture;
+	int colorMode = settings.colorMode;
 
 	uint32_t& processedTriangles = *allocator->alloc<uint32_t*>(4);
 	if(grid.thread_rank() == 0){
@@ -77,19 +108,22 @@ void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, Texture* te
 
 		block.sync();
 
+		// safety mechanism: each block draws at most <loop_max> triangles
 		int loop_max = 10'000;
 		for(int loop_i = 0; loop_i < loop_max; loop_i++){
 			
+			// grab the index of the next unprocessed triangle
 			block.sync();
 			if(block.thread_rank() == 0){
 				sh_triangleIndex = atomicAdd(&processedTriangles, 1);
 			}
 			block.sync();
 
-			if(sh_triangleIndex >= triangles->count / 3) break;
+			if(sh_triangleIndex >= triangles->numTriangles) break;
 
 			// project x/y to pixel coords
-			// z is whatever, w is the linear depth
+			// z: whatever 
+			// w: linear depth
 			auto toScreenCoord = [&](float3 p){
 				float4 pos = uniforms.transform * float4{p.x, p.y, p.z, 1.0f};
 
@@ -117,14 +151,17 @@ void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, Texture* te
 			float4 p1 = toScreenCoord(v1);
 			float4 p2 = toScreenCoord(v2);
 
-			auto isInside = [&](float4 p){
-				if(p.x < 0 || p.x >= uniforms.width) return false;
-				if(p.y < 0 || p.y >= uniforms.height) return false;
+			// auto isInside = [&](float4 p){
+			// 	if(p.x < 0 || p.x >= uniforms.width) return false;
+			// 	if(p.y < 0 || p.y >= uniforms.height) return false;
 
-				return true;
-			};
+			// 	return true;
+			// };
 
-			if(!isInside(p0) || !isInside(p1) || !isInside(p2)) continue;
+			// if(!isInside(p0) || !isInside(p1) || !isInside(p2)) continue;
+
+			// cull a triangle if one of its vertices is closer than depth 0
+			if(p0.w < 0.0 || p1.w < 0.0 || p2.w < 0.0) continue;
 
 			float2 v01 = float2{p1.x - p0.x, p1.y - p0.y};
 			float2 v02 = float2{p2.x - p0.x, p2.y - p0.y};
@@ -141,6 +178,13 @@ void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, Texture* te
 			float min_y = min(min(p0.y, p1.y), p2.y);
 			float max_x = max(max(p0.x, p1.x), p2.x);
 			float max_y = max(max(p0.y, p1.y), p2.y);
+
+			// clamp to screen
+			min_x = clamp(min_x, 0.0f, uniforms.width);
+			min_y = clamp(min_y, 0.0f, uniforms.height);
+			max_x = clamp(max_x, 0.0f, uniforms.width);
+			max_y = clamp(max_y, 0.0f, uniforms.height);
+
 			int size_x = ceil(max_x) - floor(min_x);
 			int size_y = ceil(max_y) - floor(min_y);
 			int numFragments = size_x * size_y;
@@ -149,8 +193,8 @@ void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, Texture* te
 			int numProcessedSamples = 0;
 			for(int fragOffset = 0; fragOffset < numFragments; fragOffset += block.num_threads()){
 
-				// safety mechanism: don't draw more than 1k pixels per triangle
-				if(numProcessedSamples > 10'000) break;
+				// safety mechanism: don't draw more than <x> pixels per thread
+				if(numProcessedSamples > 5'000) break;
 
 				int fragID = fragOffset + block.thread_rank();
 				int fragX = fragID % size_x;
@@ -198,15 +242,8 @@ void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, Texture* te
 					// 	rgb[2] = v * v0_rgba[2] + s * v1_rgba[2] + t * v2_rgba[2];
 					// }
 
-					// { // color by uv
-					// 	rgb[0] = 255.0f * uv.x;
-					// 	rgb[1] = 255.0f * uv.y;
-					// 	rgb[2] = 0;
-					// 	rgb[3] = 255;
-					// }
-
-					if(texture)
-					{ // color by texture
+					if(colorMode == COLORMODE_TEXTURE && texture != nullptr){
+						// color by texture
 						int tx = int(uv.x * texture->width) % texture->width;
 						int ty = int(uv.y * texture->height) % texture->height;
 						ty = texture->height - ty;
@@ -215,14 +252,25 @@ void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, Texture* te
 						uint32_t texel = texture->data[texelIndex];
 						uint8_t* texel_rgb = (uint8_t*)&texel;
 
-						rgb[0] = texel_rgb[0];
-						rgb[1] = texel_rgb[1];
-						rgb[2] = texel_rgb[2];
+						if(uniforms.sampleMode == SAMPLEMODE_NEAREST){
+							color = sample_nearest(uv, texture);
+						}else if(uniforms.sampleMode == SAMPLEMODE_LINEAR){
+							color = sample_linear(uv, texture);
+						}
+					}else if(colorMode == COLORMODE_UV && triangles->uvs != nullptr){
+						rgb[0] = 255.0f * uv.x;
+						rgb[1] = 255.0f * uv.y;
+						rgb[2] = 0;
+					}else if(colorMode == COLORMODE_TRIANGLE_ID){
+						color = sh_triangleIndex * 123456;
 					}else{
-						rgb[0] = v * v0_rgba[0] + s * v1_rgba[0] + t * v2_rgba[0];
-						rgb[1] = v * v0_rgba[1] + s * v1_rgba[1] + t * v2_rgba[1];
-						rgb[2] = v * v0_rgba[2] + s * v1_rgba[2] + t * v2_rgba[2];
+						color = sh_triangleIndex * 123456;
 					}
+
+					// try coloring by time
+					// uint64_t nanotime;
+					// asm volatile("mov.u64 %0, %%globaltimer;" : "=l"(nanotime));
+					// color = (nanotime - nanotime_start) % 0x00ffffffull;
 
 					float depth = v * p0.w + s * p1.w + t * p2.w;
 					uint64_t udepth = *((uint32_t*)&depth);
@@ -253,14 +301,12 @@ void kernel(
 	auto grid = cg::this_grid();
 	auto block = cg::this_thread_block();
 
+	asm volatile("mov.u64 %0, %%globaltimer;" : "=l"(nanotime_start));
+
 	uniforms = _uniforms;
 
 	Allocator _allocator(buffer, 0);
 	allocator = &_allocator;
-
-	// if(grid.thread_rank() == 0){
-	// 	printf("%i \n", numTriangles);
-	// }
 
 	// allocate framebuffer memory
 	int framebufferSize = int(uniforms.width) * int(uniforms.height) * sizeof(uint64_t);
@@ -275,9 +321,7 @@ void kernel(
 
 	grid.sync();
 
-	// draw some custom defined triangles
-	{
-		// make a ground plane
+	{ // generate and draw a ground plane
 		int cells = 20;
 		int numTriangles     = cells * cells * 2;
 		int numVertices      = 3 * numTriangles;
@@ -286,8 +330,7 @@ void kernel(
 		triangles->uvs       = allocator->alloc<float2*  >(sizeof(float2) * numVertices);
 		triangles->colors    = allocator->alloc<uint32_t*>(sizeof(uint32_t) * numVertices);
 
-		triangles->count = numVertices;
-		triangles->instanceCount = 1;
+		triangles->numTriangles = numTriangles;
 		
 		processRange(0, cells * cells, [&](int cellIndex){
 
@@ -321,14 +364,19 @@ void kernel(
 			triangles->colors[offset + 5]    = color;
 			triangles->colors[offset + 4]    = color;
 		});
+		
+		RasterizationSettings settings;
+		settings.texture = nullptr;
+		settings.colorMode = COLORMODE_TRIANGLE_ID;
 
-		rasterizeTriangles(triangles, framebuffer);
+		rasterizeTriangles(triangles, framebuffer, settings);
 	}
 
-	{
+	grid.sync();
+
+	{ // draw the triangle mesh that was passed to this kernel
 		Triangles* triangles = allocator->alloc<Triangles*>(sizeof(Triangles));
-		triangles->count = numTriangles * 3;
-		triangles->instanceCount = 1;
+		triangles->numTriangles = numTriangles;
 
 		triangles->positions = positions;
 		triangles->uvs = uvs;
@@ -339,7 +387,11 @@ void kernel(
 		texture.height = 1024;
 		texture.data   = textureData;
 
-		rasterizeTriangles(triangles, framebuffer, &texture);
+		RasterizationSettings settings;
+		settings.texture = &texture;
+		settings.colorMode = uniforms.colorMode;
+
+		rasterizeTriangles(triangles, framebuffer, settings);
 	}
 
 	grid.sync();
