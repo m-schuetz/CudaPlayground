@@ -6,14 +6,6 @@
 #include "helper_math.h"
 #include "HostDeviceInterface.h"
 
-namespace cg = cooperative_groups;
-
-Uniforms uniforms;
-Allocator* allocator;
-uint64_t nanotime_start;
-
-constexpr float PI = 3.1415;
-
 float4 operator*(const mat4& a, const float4& b){
 	return make_float4(
 		dot(a.rows[0], b),
@@ -49,6 +41,15 @@ mat4 operator*(const mat4& a, const mat4& b){
 
 	return result;
 }
+
+namespace cg = cooperative_groups;
+
+Uniforms uniforms;
+Allocator* allocator;
+uint64_t nanotime_start;
+
+constexpr float PI = 3.1415;
+constexpr uint32_t BACKGROUND_COLOR = 0x00332211ull;
 
 struct Triangles{
 	int numTriangles;
@@ -117,6 +118,9 @@ uint32_t sample_linear(float2 uv, Texture* texture){
 // rasterizes triangles in a block-wise fashion
 // - each block grabs a triangle
 // - all threads of that block process different fragments of the triangle
+// - <framebuffer> stores interleaved 32bit depth and color values
+// - The closest fragments are rendered via atomicMin on a combined 64bit depth&color integer
+//   atomicMin(&framebuffer[pixelIndex], (depth << 32 | color)); 
 void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, RasterizationSettings settings){
 
 	auto grid = cg::this_grid();
@@ -181,15 +185,6 @@ void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, Rasterizati
 			float4 p1 = toScreenCoord(v1);
 			float4 p2 = toScreenCoord(v2);
 
-			// auto isInside = [&](float4 p){
-			// 	if(p.x < 0 || p.x >= uniforms.width) return false;
-			// 	if(p.y < 0 || p.y >= uniforms.height) return false;
-
-			// 	return true;
-			// };
-
-			// if(!isInside(p0) || !isInside(p1) || !isInside(p2)) continue;
-
 			// cull a triangle if one of its vertices is closer than depth 0
 			if(p0.w < 0.0 || p1.w < 0.0 || p2.w < 0.0) continue;
 
@@ -236,11 +231,10 @@ void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, Rasterizati
 				};
 				float2 sample = {pFrag.x - p0.x, pFrag.y - p0.y};
 
+				// v: vertex[0], s: vertex[1], t: vertex[2]
 				float s = cross(sample, v02) / cross(v01, v02);
 				float t = cross(v01, sample) / cross(v01, v02);
 				float v = 1.0 - (s + t);
-
-				// v: vertex[0], s: vertex[1], t: vertex[2]
 
 				int2 pixelCoords = make_int2(pFrag.x, pFrag.y);
 				int pixelID = pixelCoords.x + pixelCoords.y * uniforms.width;
@@ -248,9 +242,10 @@ void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, Rasterizati
 				pixelID = max(pixelID, 0);
 				pixelID = min(pixelID, int(uniforms.width * uniforms.height));
 
-				if( (s >= 0.0) && (t >= 0.0) && (s + t <= 1.0) )
+				if(s >= 0.0)
+				if(t >= 0.0)
+				if(s + t <= 1.0)
 				{
-
 					uint8_t* v0_rgba = (uint8_t*)&triangles->colors[i0];
 					uint8_t* v1_rgba = (uint8_t*)&triangles->colors[i1];
 					uint8_t* v2_rgba = (uint8_t*)&triangles->colors[i2];
@@ -273,7 +268,7 @@ void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, Rasterizati
 					// }
 
 					if(colorMode == COLORMODE_TEXTURE && texture != nullptr){
-						// color by texture
+						// TEXTURE
 						int tx = int(uv.x * texture->width) % texture->width;
 						int ty = int(uv.y * texture->height) % texture->height;
 						ty = texture->height - ty;
@@ -288,19 +283,22 @@ void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, Rasterizati
 							color = sample_linear(uv, texture);
 						}
 					}else if(colorMode == COLORMODE_UV && triangles->uvs != nullptr){
+						// UV
 						rgb[0] = 255.0f * uv.x;
 						rgb[1] = 255.0f * uv.y;
 						rgb[2] = 0;
 					}else if(colorMode == COLORMODE_TRIANGLE_ID){
+						// TRIANGLE INDEX
 						color = sh_triangleIndex * 123456;
+					}else if(colorMode == COLORMODE_TIME || colorMode == COLORMODE_TIME_NORMALIZED){
+						// TIME
+						uint64_t nanotime;
+						asm volatile("mov.u64 %0, %%globaltimer;" : "=l"(nanotime));
+						color = (nanotime - nanotime_start) % 0x00ffffffull;
 					}else{
+						// WHATEVER
 						color = sh_triangleIndex * 123456;
 					}
-
-					// try coloring by time
-					// uint64_t nanotime;
-					// asm volatile("mov.u64 %0, %%globaltimer;" : "=l"(nanotime));
-					// color = (nanotime - nanotime_start) % 0x00ffffffull;
 
 					float depth = v * p0.w + s * p1.w + t * p2.w;
 					uint64_t udepth = *((uint32_t*)&depth);
@@ -346,13 +344,16 @@ void kernel(
 	processRange(0, uniforms.width * uniforms.height, [&](int pixelIndex){
 		// depth:            7f800000 (Infinity)
 		// background color: 00332211 (aabbggrr)
-		framebuffer[pixelIndex] = 0x7f800000'00332211ull;;
+
+		// framebuffer[pixelIndex] = 0x7f800000'00332211ull;
+		framebuffer[pixelIndex] = (uint64_t(Infinity) << 32ull) | uint64_t(BACKGROUND_COLOR);
+
 	});
 
 	grid.sync();
 
 	{ // generate and draw a ground plane
-		int cells = 20;
+		int cells = 50;
 		int numTriangles     = cells * cells * 2;
 		int numVertices      = 3 * numTriangles;
 		Triangles* triangles = allocator->alloc<Triangles*>(sizeof(Triangles));
@@ -381,16 +382,17 @@ void kernel(
 			rgb[2] = 0;
 
 			float s = 10.0f;
-			triangles->positions[offset + 0] = {s * u0 - s * 0.5f, s * v0 - s * 0.5f, -0.7f};
-			triangles->positions[offset + 1] = {s * u1 - s * 0.5f, s * v0 - s * 0.5f, -0.7f};
-			triangles->positions[offset + 2] = {s * u1 - s * 0.5f, s * v1 - s * 0.5f, -0.7f};
+			float height = -0.5f;
+			triangles->positions[offset + 0] = {s * u0 - s * 0.5f, s * v0 - s * 0.5f, height};
+			triangles->positions[offset + 1] = {s * u1 - s * 0.5f, s * v0 - s * 0.5f, height};
+			triangles->positions[offset + 2] = {s * u1 - s * 0.5f, s * v1 - s * 0.5f, height};
 			triangles->colors[offset + 0] = color;
 			triangles->colors[offset + 1] = color;
 			triangles->colors[offset + 2] = color;
 
-			triangles->positions[offset + 3] = {s * u0 - s * 0.5f, s * v0 - s * 0.5f, -0.7f};
-			triangles->positions[offset + 4] = {s * u1 - s * 0.5f, s * v1 - s * 0.5f, -0.7f};
-			triangles->positions[offset + 5] = {s * u0 - s * 0.5f, s * v1 - s * 0.5f, -0.7f};
+			triangles->positions[offset + 3] = {s * u0 - s * 0.5f, s * v0 - s * 0.5f, height};
+			triangles->positions[offset + 4] = {s * u1 - s * 0.5f, s * v1 - s * 0.5f, height};
+			triangles->positions[offset + 5] = {s * u0 - s * 0.5f, s * v1 - s * 0.5f, height};
 			triangles->colors[offset + 3] = color;
 			triangles->colors[offset + 4] = color;
 			triangles->colors[offset + 5] = color;
@@ -400,6 +402,14 @@ void kernel(
 		settings.texture = nullptr;
 		settings.colorMode = COLORMODE_TRIANGLE_ID;
 		settings.world = mat4::identity();
+
+		// due to normalization, everything needs to be colored by time
+		// lets draw the ground with non-normalized time as well for consistency
+		if(uniforms.colorMode == COLORMODE_TIME){
+			settings.colorMode = COLORMODE_TIME_NORMALIZED;
+		}else if(uniforms.colorMode == COLORMODE_TIME_NORMALIZED){
+			settings.colorMode = COLORMODE_TIME_NORMALIZED;
+		}
 
 		rasterizeTriangles(triangles, framebuffer, settings);
 	}
@@ -446,6 +456,32 @@ void kernel(
 
 	grid.sync();
 
+	uint32_t& maxNanos = *allocator->alloc<uint32_t*>(4);
+
+	// if colored by normalized time, we compute the max time for normalization
+	if(uniforms.colorMode == COLORMODE_TIME_NORMALIZED){
+		if(grid.thread_rank() == 0){
+			maxNanos = 0;
+		}
+		grid.sync();
+
+		processRange(0, uniforms.width * uniforms.height, [&](int pixelIndex){
+
+			int x = pixelIndex % int(uniforms.width);
+			int y = pixelIndex / int(uniforms.width);
+
+			uint64_t encoded = framebuffer[pixelIndex];
+			uint32_t color = encoded & 0xffffffffull;
+
+			if(color != BACKGROUND_COLOR){
+				atomicMax(&maxNanos, color);
+			}
+		});
+
+		grid.sync();
+	}
+
+
 	// transfer framebuffer to opengl texture
 	processRange(0, uniforms.width * uniforms.height, [&](int pixelIndex){
 
@@ -454,6 +490,13 @@ void kernel(
 
 		uint64_t encoded = framebuffer[pixelIndex];
 		uint32_t color = encoded & 0xffffffffull;
+
+		if(uniforms.colorMode == COLORMODE_TIME_NORMALIZED)
+		if(color != BACKGROUND_COLOR)
+		{
+			color = color / (maxNanos / 255);
+		}
+
 
 		surf2Dwrite(color, gl_colorbuffer, x * 4, y);
 	});

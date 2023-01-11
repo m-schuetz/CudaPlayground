@@ -50,20 +50,11 @@ void initCuda(){
 
 void renderCUDA(shared_ptr<GLRenderer> renderer){
 
-	static float toggle = 1.0;
-	static float lastFrameTime = now();
-	float timeSinceLastFrame = now() - lastFrameTime;
-	toggle += timeSinceLastFrame;
-
-	// if(toggle >= 1.0){
-		cuGraphicsGLRegisterImage(
-			&cugl_colorbuffer, 
-			renderer->view.framebuffer->colorAttachments[0]->handle, 
-			GL_TEXTURE_2D, 
-			CU_GRAPHICS_REGISTER_FLAGS_WRITE_DISCARD);
-
-		// toggle = 0.0;
-	// }
+	cuGraphicsGLRegisterImage(
+		&cugl_colorbuffer, 
+		renderer->view.framebuffer->colorAttachments[0]->handle, 
+		GL_TEXTURE_2D, 
+		CU_GRAPHICS_REGISTER_FLAGS_WRITE_DISCARD);
 
 	CUresult resultcode = CUDA_SUCCESS;
 
@@ -72,13 +63,13 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 	cuCtxGetDevice(&device);
 	cuDeviceGetAttribute(&numSMs, CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, device);
 
-	int workgroupSize = 256;
+	int workgroupSize = 128;
 
 	int numGroups;
 	resultcode = cuOccupancyMaxActiveBlocksPerMultiprocessor(&numGroups, cuda_program->kernels["kernel"], workgroupSize, 0);
 	numGroups *= numSMs;
 	
-	numGroups = 100;
+	//numGroups = 100;
 	// make sure at least 10 workgroups are spawned)
 	numGroups = std::clamp(numGroups, 10, 100'000);
 
@@ -186,10 +177,6 @@ void initCudaProgram(
 	cuEventCreate(&cevent_end, 0);
 
 	cuGraphicsGLRegisterImage(&cugl_colorbuffer, renderer->view.framebuffer->colorAttachments[0]->handle, GL_TEXTURE_2D, CU_GRAPHICS_REGISTER_FLAGS_WRITE_DISCARD);
-
-	// cuda_program->onCompile([&](){
-	// 	runCudaProgram();
-	// });
 }
 
 
@@ -220,30 +207,17 @@ int main(){
 		colors[i] = color;
 	}
 
-	// cout << texture->size << endl;
-
-	//for(int i = 0; i < 50; i++){
-	//	int value = texture->get<uint8_t>(i);
-	//	cout << i << ": " << value << endl;
-	//}
-
-	// return 0;
-
 	initCudaProgram(renderer, model, colors);
 
 
-	// return 0;
-
 	auto update = [&](){
-		//parametric->update();
+		
 	};
 
 	auto render = [&](){
 		renderer->view.framebuffer->setSize(renderer->width, renderer->height);
 
 		glBindFramebuffer(GL_FRAMEBUFFER, renderer->view.framebuffer->handle);
-		// glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-		// glClear(GL_COLOR_BUFFER_BIT);
 
 		renderCUDA(renderer);
 
@@ -253,16 +227,6 @@ int main(){
 			ImGui::SetNextWindowSize(ImVec2(490, 180));
 
 			ImGui::Begin("Infos");
-
-			// ImGui::Text("Cuda software rasterizer rendering 25 instances of the spot model (5856k triangles, each)");
-
-// 			ImGui::TextWrapped(R"V0G0N(
-// * Cuda software rasterizer rendering 25 instances of the spot model (5856 triangles, each).
-// * Each cuda block renders one triangle, with each thread processing a different fragment.
-// * Cuda Kernel: rasterizeTriangles/rasterize.cu
-// * Spot model courtesy of Keenan Crane.
-
-// )V0G0N");
 			
 			ImGui::BulletText("Cuda software rasterizer rendering 25 instances of the spot model \n(5856 triangles, each).");
 			ImGui::BulletText("Each cuda block renders one triangle, \nwith each thread processing a different fragment.");
@@ -275,7 +239,7 @@ int main(){
 		{ // SETTINGS WINDOW
 
 			ImGui::SetNextWindowPos(ImVec2(10, 280 + 180 + 10));
-			ImGui::SetNextWindowSize(ImVec2(490, 180));
+			ImGui::SetNextWindowSize(ImVec2(490, 230));
 
 			ImGui::Begin("Settings");
 
@@ -283,6 +247,8 @@ int main(){
 			ImGui::RadioButton("Texture", &colorMode, COLORMODE_TEXTURE);
 			ImGui::RadioButton("UVs", &colorMode, COLORMODE_UV);
 			ImGui::RadioButton("Triangle Index", &colorMode, COLORMODE_TRIANGLE_ID);
+			ImGui::RadioButton("Time", &colorMode, COLORMODE_TIME);
+			ImGui::RadioButton("Time (normalized)", &colorMode, COLORMODE_TIME_NORMALIZED);
 
 			ImGui::Text("Sampling:");
 			ImGui::RadioButton("Nearest", &sampleMode, SAMPLEMODE_NEAREST);
