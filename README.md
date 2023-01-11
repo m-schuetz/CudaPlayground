@@ -6,6 +6,27 @@ This project provides basic templates of a cuda programs that can be <b>modified
 
 Three example programs are provided, one using the console and two using OpenGL interop to draw an image with CUDA and display the resulting image with OpenGL.
 
+## CUDA Triangle Rasterizer
+
+Main: [main_rasterize_triangles.cpp](./modules/rasterizeTriangles/main_rasterize_triangles.cpp) <br>
+Kernel: [rasterize.cu](./modules/rasterizeTriangles/rasterize.cu)
+
+Rasterizes 25 instances of the spot model.
+
+* First allocates bytes for an interleaved depth&color buffer
+* Clears it with all launched threads
+* Generates and draws a ground plane, colored by triangle index
+* Then draws the spot model with rasterizeTriangles() 
+	* Each cuda block grabs a triangle
+	* Block projects it to screen
+	* Block computes the screen-space bounding box
+	* Iterates through all fragments, utilizing one block-thread per fragment
+	* Each thread stores the fragment via a 64bit atomicMin that encodes depth and color 
+* If colored by normalized time, computes the max time.
+* Finally transfers the results from our custom buffer to an OpenGL texture
+
+![jpeg](./docs/cuda_rasterize_triangles.gif)
+
 ## Random Numbers
 
 Kernel: [randomNumbers.cu](./modules/randomNumbers/randomNumbers.cu)

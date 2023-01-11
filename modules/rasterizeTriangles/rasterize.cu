@@ -342,12 +342,8 @@ void kernel(
 
 	// clear framebuffer
 	processRange(0, uniforms.width * uniforms.height, [&](int pixelIndex){
-		// depth:            7f800000 (Infinity)
-		// background color: 00332211 (aabbggrr)
-
 		// framebuffer[pixelIndex] = 0x7f800000'00332211ull;
 		framebuffer[pixelIndex] = (uint64_t(Infinity) << 32ull) | uint64_t(BACKGROUND_COLOR);
-
 	});
 
 	grid.sync();
