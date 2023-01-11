@@ -23,6 +23,33 @@ float4 operator*(const mat4& a, const float4& b){
 	);
 }
 
+mat4 operator*(const mat4& a, const mat4& b){
+	
+	mat4 result;
+
+	result.rows[0].x = dot(a.rows[0], {b.rows[0].x, b.rows[1].x, b.rows[2].x, b.rows[3].x});
+	result.rows[0].y = dot(a.rows[0], {b.rows[0].y, b.rows[1].y, b.rows[2].y, b.rows[3].y});
+	result.rows[0].z = dot(a.rows[0], {b.rows[0].z, b.rows[1].z, b.rows[2].z, b.rows[3].z});
+	result.rows[0].w = dot(a.rows[0], {b.rows[0].w, b.rows[1].w, b.rows[2].w, b.rows[3].w});
+
+	result.rows[1].x = dot(a.rows[1], {b.rows[0].x, b.rows[1].x, b.rows[2].x, b.rows[3].x});
+	result.rows[1].y = dot(a.rows[1], {b.rows[0].y, b.rows[1].y, b.rows[2].y, b.rows[3].y});
+	result.rows[1].z = dot(a.rows[1], {b.rows[0].z, b.rows[1].z, b.rows[2].z, b.rows[3].z});
+	result.rows[1].w = dot(a.rows[1], {b.rows[0].w, b.rows[1].w, b.rows[2].w, b.rows[3].w});
+
+	result.rows[2].x = dot(a.rows[2], {b.rows[0].x, b.rows[1].x, b.rows[2].x, b.rows[3].x});
+	result.rows[2].y = dot(a.rows[2], {b.rows[0].y, b.rows[1].y, b.rows[2].y, b.rows[3].y});
+	result.rows[2].z = dot(a.rows[2], {b.rows[0].z, b.rows[1].z, b.rows[2].z, b.rows[3].z});
+	result.rows[2].w = dot(a.rows[2], {b.rows[0].w, b.rows[1].w, b.rows[2].w, b.rows[3].w});
+
+	result.rows[3].x = dot(a.rows[3], {b.rows[0].x, b.rows[1].x, b.rows[2].x, b.rows[3].x});
+	result.rows[3].y = dot(a.rows[3], {b.rows[0].y, b.rows[1].y, b.rows[2].y, b.rows[3].y});
+	result.rows[3].z = dot(a.rows[3], {b.rows[0].z, b.rows[1].z, b.rows[2].z, b.rows[3].z});
+	result.rows[3].w = dot(a.rows[3], {b.rows[0].w, b.rows[1].w, b.rows[2].w, b.rows[3].w});
+
+	return result;
+}
+
 struct Triangles{
 	int numTriangles;
 	float3* positions;
@@ -39,6 +66,7 @@ struct Texture{
 struct RasterizationSettings{
 	Texture* texture = nullptr;
 	int colorMode = COLORMODE_TRIANGLE_ID;
+	mat4 world;
 };
 
 uint32_t sample_nearest(float2 uv, Texture* texture){
@@ -96,6 +124,8 @@ void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, Rasterizati
 
 	Texture* texture = settings.texture;
 	int colorMode = settings.colorMode;
+	
+	mat4 transform = uniforms.proj * uniforms.view * settings.world;
 
 	uint32_t& processedTriangles = *allocator->alloc<uint32_t*>(4);
 	if(grid.thread_rank() == 0){
@@ -125,7 +155,7 @@ void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, Rasterizati
 			// z: whatever 
 			// w: linear depth
 			auto toScreenCoord = [&](float3 p){
-				float4 pos = uniforms.transform * float4{p.x, p.y, p.z, 1.0f};
+				float4 pos = transform * float4{p.x, p.y, p.z, 1.0f};
 
 				pos.x = pos.x / pos.w;
 				pos.y = pos.y / pos.w;
@@ -350,24 +380,26 @@ void kernel(
 			rgb[1] = 255.0f * v0;
 			rgb[2] = 0;
 
-			triangles->positions[offset + 0] = {2.0 * u0 - 1.0, -0.7, 2.0 * v0 - 1.0};
-			triangles->positions[offset + 2] = {2.0 * u1 - 1.0, -0.7, 2.0 * v0 - 1.0};
-			triangles->positions[offset + 1] = {2.0 * u1 - 1.0, -0.7, 2.0 * v1 - 1.0};
-			triangles->colors[offset + 0]    = color;
-			triangles->colors[offset + 2]    = color;
-			triangles->colors[offset + 1]    = color;
+			float s = 10.0f;
+			triangles->positions[offset + 0] = {s * u0 - s * 0.5f, s * v0 - s * 0.5f, -0.7f};
+			triangles->positions[offset + 1] = {s * u1 - s * 0.5f, s * v0 - s * 0.5f, -0.7f};
+			triangles->positions[offset + 2] = {s * u1 - s * 0.5f, s * v1 - s * 0.5f, -0.7f};
+			triangles->colors[offset + 0] = color;
+			triangles->colors[offset + 1] = color;
+			triangles->colors[offset + 2] = color;
 
-			triangles->positions[offset + 3] = {2.0 * u0 - 1.0, -0.7, 2.0 * v0 - 1.0};
-			triangles->positions[offset + 5] = {2.0 * u1 - 1.0, -0.7, 2.0 * v1 - 1.0};
-			triangles->positions[offset + 4] = {2.0 * u0 - 1.0, -0.7, 2.0 * v1 - 1.0};
-			triangles->colors[offset + 3]    = color;
-			triangles->colors[offset + 5]    = color;
-			triangles->colors[offset + 4]    = color;
+			triangles->positions[offset + 3] = {s * u0 - s * 0.5f, s * v0 - s * 0.5f, -0.7f};
+			triangles->positions[offset + 4] = {s * u1 - s * 0.5f, s * v1 - s * 0.5f, -0.7f};
+			triangles->positions[offset + 5] = {s * u0 - s * 0.5f, s * v1 - s * 0.5f, -0.7f};
+			triangles->colors[offset + 3] = color;
+			triangles->colors[offset + 4] = color;
+			triangles->colors[offset + 5] = color;
 		});
 		
 		RasterizationSettings settings;
 		settings.texture = nullptr;
 		settings.colorMode = COLORMODE_TRIANGLE_ID;
+		settings.world = mat4::identity();
 
 		rasterizeTriangles(triangles, framebuffer, settings);
 	}
@@ -390,8 +422,26 @@ void kernel(
 		RasterizationSettings settings;
 		settings.texture = &texture;
 		settings.colorMode = uniforms.colorMode;
+		settings.world = uniforms.world;
 
-		rasterizeTriangles(triangles, framebuffer, settings);
+		// rasterizeTriangles(triangles, framebuffer, settings);
+		
+		for(float ox : {-3.0f, -1.5f, 0.0f, 1.5f, 3.0f})
+		for(float oy : {-3.0f, -1.5f, 0.0f, 1.5f, 3.0f})
+		{
+
+			// float s = 1.0 - length(float2{ox, oy}) / 6.0;
+			float s = 0.8f;
+			mat4 rot = mat4::rotate(0.5f * PI, {1.0f, 0.0f, 0.0f}).transpose();
+			mat4 translate = mat4::translate(ox, oy, 0.0f);
+			mat4 scale = mat4::scale(s, s, s);
+			mat4 wiggle = mat4::rotate(cos(5.0f * uniforms.time) * 0.1f, {0.0f, 1.0f, 0.0f}).transpose();
+			mat4 wiggle_yaw = mat4::rotate(cos(5.0f * uniforms.time) * 0.1f, {0.0f, 0.0f, 1.0f}).transpose();
+			
+			settings.world = translate * wiggle * wiggle_yaw * rot * scale;
+
+			rasterizeTriangles(triangles, framebuffer, settings);
+		}
 	}
 
 	grid.sync();

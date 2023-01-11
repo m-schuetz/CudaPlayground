@@ -138,7 +138,7 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 	}
 
 	cuEventRecord(cevent_end, 0);
-	cuEventSynchronize(cevent_end);
+	// cuEventSynchronize(cevent_end);
 
 	// {
 	// 	float total_ms;
@@ -151,7 +151,7 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 	cuCtxSynchronize();
 
 	cuSurfObjectDestroy(output_surf);
-			cuGraphicsUnmapResources(dynamic_resources.size(), dynamic_resources.data(), ((CUstream)CU_STREAM_DEFAULT));
+	cuGraphicsUnmapResources(dynamic_resources.size(), dynamic_resources.data(), ((CUstream)CU_STREAM_DEFAULT));
 	cuGraphicsUnregisterResource(cugl_colorbuffer);
 
 
@@ -200,9 +200,9 @@ int main(){
 
 	auto renderer = make_shared<GLRenderer>();
 
-	renderer->controls->yaw = -2.15;
-	renderer->controls->pitch = -0.57;
-	renderer->controls->radius = 3.0;
+	renderer->controls->yaw = -2.6;
+	renderer->controls->pitch = -0.4;
+	renderer->controls->radius = 6.0;
 	renderer->controls->target = {0.0f, 0.0f, 0.0f};
 
 	initCuda();
@@ -247,10 +247,35 @@ int main(){
 
 		renderCUDA(renderer);
 
-		{ // RENDER IMGUI PERFORMANCE WINDOW
+		{ // INFO WINDOW
 
-			ImGui::SetNextWindowPos(ImVec2(10, 400));
-			ImGui::SetNextWindowSize(ImVec2(490, 260));
+			ImGui::SetNextWindowPos(ImVec2(10, 280));
+			ImGui::SetNextWindowSize(ImVec2(490, 180));
+
+			ImGui::Begin("Infos");
+
+			// ImGui::Text("Cuda software rasterizer rendering 25 instances of the spot model (5856k triangles, each)");
+
+// 			ImGui::TextWrapped(R"V0G0N(
+// * Cuda software rasterizer rendering 25 instances of the spot model (5856 triangles, each).
+// * Each cuda block renders one triangle, with each thread processing a different fragment.
+// * Cuda Kernel: rasterizeTriangles/rasterize.cu
+// * Spot model courtesy of Keenan Crane.
+
+// )V0G0N");
+			
+			ImGui::BulletText("Cuda software rasterizer rendering 25 instances of the spot model \n(5856 triangles, each).");
+			ImGui::BulletText("Each cuda block renders one triangle, \nwith each thread processing a different fragment.");
+			ImGui::BulletText("Cuda Kernel: rasterizeTriangles/rasterize.cu");
+			ImGui::BulletText("Spot model courtesy of Keenan Crane.");
+
+			ImGui::End();
+		}
+
+		{ // SETTINGS WINDOW
+
+			ImGui::SetNextWindowPos(ImVec2(10, 280 + 180 + 10));
+			ImGui::SetNextWindowSize(ImVec2(490, 180));
 
 			ImGui::Begin("Settings");
 
