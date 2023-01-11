@@ -262,6 +262,10 @@ void GLRenderer::loop(function<void(void)> update, function<void(void)> render){
 			camera->position = camera->world * dvec4(0.0, 0.0, 0.0, 1.0);
 		}
 
+		ImGui_ImplOpenGL3_NewFrame();
+		ImGui_ImplGlfw_NewFrame();
+		ImGui::NewFrame();
+
 		{ // UPDATE & RENDER
 			camera->update();
 			update();
@@ -270,20 +274,7 @@ void GLRenderer::loop(function<void(void)> update, function<void(void)> render){
 			render();
 		}
 
-		auto source = view.framebuffer;
-		glBlitNamedFramebuffer(
-			source->handle, 0,
-			0, 0, source->width, source->height,
-			0, 0, 0 + source->width, 0 + source->height,
-			GL_COLOR_BUFFER_BIT, GL_LINEAR);
-
-		glBindFramebuffer(GL_FRAMEBUFFER, 0);
-		glViewport(0, 0, this->width, this->height);
-
 		// IMGUI
-		ImGui_ImplOpenGL3_NewFrame();
-		ImGui_ImplGlfw_NewFrame();
-		ImGui::NewFrame();
 		auto windowSize_perf = ImVec2(490, 260);
 
 		{ // RENDER IMGUI PERFORMANCE WINDOW
@@ -330,6 +321,16 @@ void GLRenderer::loop(function<void(void)> update, function<void(void)> render){
 
 		ImGui::Render();
 		ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+		auto source = view.framebuffer;
+		glBlitNamedFramebuffer(
+			source->handle, 0,
+			0, 0, source->width, source->height,
+			0, 0, 0 + source->width, 0 + source->height,
+			GL_COLOR_BUFFER_BIT, GL_LINEAR);
+
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		glViewport(0, 0, this->width, this->height);
 
 
 		glfwSwapBuffers(window);

@@ -629,6 +629,34 @@ inline string repeat(string str, int64_t repetitions) {
 	return result;
 }
 
+inline vector<string> split(string str, char delimiter){
+
+	vector<string> result;
+
+	int pos = 0;
+	while(true){
+		int nextPos = str.find(delimiter, pos);
+
+		if(nextPos == string::npos) break;
+
+		string token = str.substr(pos, nextPos - pos);
+
+		result.push_back(token);
+
+		pos = nextPos + 1;
+	}
+
+	{
+		string token = str.substr(pos, string::npos);
+
+		if(token.size() > 0){
+			result.push_back(token);
+		}
+	}
+
+	return result;
+}
+
 void toClipboard(string str);
 
 struct EventQueue {
