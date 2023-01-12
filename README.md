@@ -4,7 +4,7 @@
 
 This project provides basic templates of a cuda programs that can be <b>modified and executed at runtime</b> by saving the cuda kernel file (with ctrl+s). It's meant to help with developing algorithms by providing a near-instant feedback loop. 
 
-Three example programs are provided, one using the console and two using OpenGL interop to draw an image with CUDA and display the resulting image with OpenGL.
+Several example programs are provided, one using the console and others using OpenGL interop to draw an image with CUDA and display the resulting image with OpenGL.
 
 ## CUDA Triangle Rasterizer
 

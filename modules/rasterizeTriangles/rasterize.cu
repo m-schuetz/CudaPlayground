@@ -177,6 +177,7 @@ void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, Rasterizati
 			int i0 = 3 * sh_triangleIndex + 0;
 			int i1 = 3 * sh_triangleIndex + 1;
 			int i2 = 3 * sh_triangleIndex + 2;
+			
 			float3 v0 = triangles->positions[i0];
 			float3 v1 = triangles->positions[i1];
 			float3 v2 = triangles->positions[i2];
@@ -188,8 +189,8 @@ void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, Rasterizati
 			// cull a triangle if one of its vertices is closer than depth 0
 			if(p0.w < 0.0 || p1.w < 0.0 || p2.w < 0.0) continue;
 
-			float2 v01 = float2{p1.x - p0.x, p1.y - p0.y};
-			float2 v02 = float2{p2.x - p0.x, p2.y - p0.y};
+			float2 v01 = {p1.x - p0.x, p1.y - p0.y};
+			float2 v02 = {p2.x - p0.x, p2.y - p0.y};
 
 			auto cross = [](float2 a, float2 b){ return a.x * b.y - a.y * b.x; };
 
@@ -238,9 +239,7 @@ void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, Rasterizati
 
 				int2 pixelCoords = make_int2(pFrag.x, pFrag.y);
 				int pixelID = pixelCoords.x + pixelCoords.y * uniforms.width;
-
-				pixelID = max(pixelID, 0);
-				pixelID = min(pixelID, int(uniforms.width * uniforms.height));
+				pixelID = clamp(pixelID, 0, int(uniforms.width * uniforms.height) - 1);
 
 				if(s >= 0.0)
 				if(t >= 0.0)
@@ -379,19 +378,14 @@ void kernel(
 
 			float s = 10.0f;
 			float height = -0.5f;
+			
 			triangles->positions[offset + 0] = {s * u0 - s * 0.5f, s * v0 - s * 0.5f, height};
 			triangles->positions[offset + 1] = {s * u1 - s * 0.5f, s * v0 - s * 0.5f, height};
 			triangles->positions[offset + 2] = {s * u1 - s * 0.5f, s * v1 - s * 0.5f, height};
-			triangles->colors[offset + 0] = color;
-			triangles->colors[offset + 1] = color;
-			triangles->colors[offset + 2] = color;
 
 			triangles->positions[offset + 3] = {s * u0 - s * 0.5f, s * v0 - s * 0.5f, height};
 			triangles->positions[offset + 4] = {s * u1 - s * 0.5f, s * v1 - s * 0.5f, height};
 			triangles->positions[offset + 5] = {s * u0 - s * 0.5f, s * v1 - s * 0.5f, height};
-			triangles->colors[offset + 3] = color;
-			triangles->colors[offset + 4] = color;
-			triangles->colors[offset + 5] = color;
 		});
 		
 		RasterizationSettings settings;
@@ -399,7 +393,7 @@ void kernel(
 		settings.colorMode = COLORMODE_TRIANGLE_ID;
 		settings.world = mat4::identity();
 
-		// due to normalization, everything needs to be colored by time
+		// when drawing time, due to normalization, everything needs to be colored by time
 		// lets draw the ground with non-normalized time as well for consistency
 		if(uniforms.colorMode == COLORMODE_TIME){
 			settings.colorMode = COLORMODE_TIME_NORMALIZED;
@@ -432,6 +426,7 @@ void kernel(
 
 		// rasterizeTriangles(triangles, framebuffer, settings);
 		
+		// 5x5 instances at specified offsets
 		for(float ox : {-3.0f, -1.5f, 0.0f, 1.5f, 3.0f})
 		for(float oy : {-3.0f, -1.5f, 0.0f, 1.5f, 3.0f})
 		{
