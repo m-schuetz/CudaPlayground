@@ -104,4 +104,20 @@ struct Uniforms{
 	mat4 transform;
 	int colorMode;
 	int sampleMode;
+
+	bool vrEnabled;
+
+	float vr_left_width;
+	float vr_left_height;
+	mat4 vr_left_world;
+	mat4 vr_left_view;
+	mat4 vr_left_proj;
+	mat4 vr_left_transform;
+
+	float vr_right_width;
+	float vr_right_height;
+	mat4 vr_right_world;
+	mat4 vr_right_view;
+	mat4 vr_right_proj;
+	mat4 vr_right_transform;
 };

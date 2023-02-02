@@ -318,7 +318,9 @@ extern "C" __global__
 void kernel(
 	const Uniforms _uniforms,
 	unsigned int* buffer,
-	cudaSurfaceObject_t gl_colorbuffer,
+	cudaSurfaceObject_t gl_colorbuffer_main,
+	cudaSurfaceObject_t gl_colorbuffer_vr_left,
+	cudaSurfaceObject_t gl_colorbuffer_vr_right,
 	uint32_t numTriangles,
 	float3* positions,
 	float2* uvs,
@@ -489,7 +491,28 @@ void kernel(
 		}
 
 
-		surf2Dwrite(color, gl_colorbuffer, x * 4, y);
+		surf2Dwrite(color, gl_colorbuffer_main, x * 4, y);
+	});
+
+
+	if(uniforms.vrEnabled)
+	processRange(0, uniforms.vr_left_width * uniforms.vr_left_height, [&](int pixelIndex){
+		int x = pixelIndex % int(uniforms.vr_left_width);
+		int y = pixelIndex / int(uniforms.vr_left_width);
+
+		uint32_t color = 0x000000ff;
+
+		surf2Dwrite(color, gl_colorbuffer_vr_left, x * 4, y);
+	});
+
+	if(uniforms.vrEnabled)
+	processRange(0, uniforms.vr_right_width * uniforms.vr_right_height, [&](int pixelIndex){
+		int x = pixelIndex % int(uniforms.vr_right_width);
+		int y = pixelIndex / int(uniforms.vr_right_width);
+
+		uint32_t color = 0x0000ff00;
+
+		surf2Dwrite(color, gl_colorbuffer_vr_right, x * 4, y);
 	});
 
 

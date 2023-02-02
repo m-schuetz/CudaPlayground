@@ -28,7 +28,10 @@ CUdeviceptr cptr_buffer;
 CUdeviceptr cptr_positions, cptr_uvs, cptr_colors;
 CUdeviceptr cptr_texture;
 
-CUgraphicsResource cugl_colorbuffer;
+View viewLeft;
+View viewRight;
+
+CUgraphicsResource cugl_main, cugl_vr_left, cugl_vr_right;
 CudaModularProgram* cuda_program = nullptr;
 CUevent cevent_start, cevent_end;
 
@@ -52,10 +55,19 @@ void initCuda(){
 void renderCUDA(shared_ptr<GLRenderer> renderer){
 
 	cuGraphicsGLRegisterImage(
-		&cugl_colorbuffer, 
+		&cugl_main, 
 		renderer->view.framebuffer->colorAttachments[0]->handle, 
-		GL_TEXTURE_2D, 
-		CU_GRAPHICS_REGISTER_FLAGS_WRITE_DISCARD);
+		GL_TEXTURE_2D, CU_GRAPHICS_REGISTER_FLAGS_WRITE_DISCARD);
+
+	cuGraphicsGLRegisterImage(
+		&cugl_vr_left, 
+		viewLeft.framebuffer->colorAttachments[0]->handle, 
+		GL_TEXTURE_2D, CU_GRAPHICS_REGISTER_FLAGS_WRITE_DISCARD);
+
+	cuGraphicsGLRegisterImage(
+		&cugl_vr_right, 
+		viewRight.framebuffer->colorAttachments[0]->handle, 
+		GL_TEXTURE_2D, CU_GRAPHICS_REGISTER_FLAGS_WRITE_DISCARD);
 
 	CUresult resultcode = CUDA_SUCCESS;
 
@@ -74,13 +86,26 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 	// make sure at least 10 workgroups are spawned)
 	numGroups = std::clamp(numGroups, 10, 100'000);
 
-	std::vector<CUgraphicsResource> dynamic_resources = {cugl_colorbuffer};
+	vector<CUgraphicsResource> dynamic_resources = {cugl_main, cugl_vr_left, cugl_vr_right};
 	cuGraphicsMapResources(dynamic_resources.size(), dynamic_resources.data(), ((CUstream)CU_STREAM_DEFAULT));
-	CUDA_RESOURCE_DESC res_desc = {};
-	res_desc.resType = CUresourcetype::CU_RESOURCE_TYPE_ARRAY;
-	cuGraphicsSubResourceGetMappedArray(&res_desc.res.array.hArray, cugl_colorbuffer, 0, 0);
-	CUsurfObject output_surf;
-	cuSurfObjectCreate(&output_surf, &res_desc);
+
+	CUDA_RESOURCE_DESC res_desc_main = {};
+	res_desc_main.resType = CUresourcetype::CU_RESOURCE_TYPE_ARRAY;
+	cuGraphicsSubResourceGetMappedArray(&res_desc_main.res.array.hArray, cugl_main, 0, 0);
+	CUsurfObject output_main;
+	cuSurfObjectCreate(&output_main, &res_desc_main);
+
+	CUDA_RESOURCE_DESC res_desc_vr_left = {};
+	res_desc_vr_left.resType = CUresourcetype::CU_RESOURCE_TYPE_ARRAY;
+	cuGraphicsSubResourceGetMappedArray(&res_desc_vr_left.res.array.hArray, cugl_vr_left, 0, 0);
+	CUsurfObject output_vr_left;
+	cuSurfObjectCreate(&output_vr_left, &res_desc_vr_left);
+
+	CUDA_RESOURCE_DESC res_desc_vr_right = {};
+	res_desc_vr_right.resType = CUresourcetype::CU_RESOURCE_TYPE_ARRAY;
+	cuGraphicsSubResourceGetMappedArray(&res_desc_vr_right.res.array.hArray, cugl_vr_right, 0, 0);
+	CUsurfObject output_vr_right;
+	cuSurfObjectCreate(&output_vr_right, &res_desc_vr_right);
 
 	cuEventRecord(cevent_start, 0);
 
@@ -93,27 +118,64 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 	uniforms.colorMode = colorMode;
 	uniforms.sampleMode = sampleMode;
 
-	glm::mat4 rotX = glm::rotate(glm::mat4(), 3.1415f * 0.5f, glm::vec3(1.0, 0.0, 0.0));
+	uniforms.vrEnabled = vrEnabled;
+	uniforms.vr_left_width = viewLeft.framebuffer->width;
+	uniforms.vr_left_height = viewLeft.framebuffer->height;
+	uniforms.vr_right_width = viewRight.framebuffer->width;
+	uniforms.vr_right_height = viewRight.framebuffer->height;
 
-	glm::mat4 world = rotX;
-	glm::mat4 view = renderer->camera->view;
-	glm::mat4 proj = renderer->camera->proj;
-	glm::mat4 worldViewProj = proj * view * world;
-	world = glm::transpose(world);
-	view = glm::transpose(view);
-	proj = glm::transpose(proj);
-	worldViewProj = glm::transpose(worldViewProj);
-	memcpy(&uniforms.world, &world, sizeof(world));
-	memcpy(&uniforms.view, &view, sizeof(view));
-	memcpy(&uniforms.proj, &proj, sizeof(proj));
-	memcpy(&uniforms.transform, &worldViewProj, sizeof(worldViewProj));
+	{ // world view proj
+		glm::mat4 rotX = glm::rotate(glm::mat4(), 3.1415f * 0.5f, glm::vec3(1.0, 0.0, 0.0));
+		glm::mat4 world = rotX;
+		glm::mat4 view = renderer->camera->view;
+		glm::mat4 proj = renderer->camera->proj;
+		glm::mat4 worldViewProj = proj * view * world;
+		world = glm::transpose(world);
+		view = glm::transpose(view);
+		proj = glm::transpose(proj);
+		worldViewProj = glm::transpose(worldViewProj);
+		memcpy(&uniforms.world, &world, sizeof(world));
+		memcpy(&uniforms.view, &view, sizeof(view));
+		memcpy(&uniforms.proj, &proj, sizeof(proj));
+		memcpy(&uniforms.transform, &worldViewProj, sizeof(worldViewProj));
+	}
 
-	float values[16];
-	memcpy(&values, &worldViewProj, sizeof(worldViewProj));
+	{ // world view proj VR LEFT
+		glm::mat4 rotX = glm::rotate(glm::mat4(), 3.1415f * 0.5f, glm::vec3(1.0, 0.0, 0.0));
+		glm::mat4 world = rotX;
+		glm::mat4 view = viewLeft.view;
+		glm::mat4 proj = viewLeft.proj;
+		glm::mat4 worldViewProj = proj * view * world;
+		world = glm::transpose(world);
+		view = glm::transpose(view);
+		proj = glm::transpose(proj);
+		worldViewProj = glm::transpose(worldViewProj);
+		memcpy(&uniforms.vr_left_world, &world, sizeof(world));
+		memcpy(&uniforms.vr_left_view, &view, sizeof(view));
+		memcpy(&uniforms.vr_left_proj, &proj, sizeof(proj));
+		memcpy(&uniforms.vr_left_transform, &worldViewProj, sizeof(worldViewProj));
+	}
+
+	{ // world view proj VR RIGHT
+		glm::mat4 rotX = glm::rotate(glm::mat4(), 3.1415f * 0.5f, glm::vec3(1.0, 0.0, 0.0));
+		glm::mat4 world = rotX;
+		glm::mat4 view = viewRight.view;
+		glm::mat4 proj = viewRight.proj;
+		glm::mat4 worldViewProj = proj * view * world;
+		world = glm::transpose(world);
+		view = glm::transpose(view);
+		proj = glm::transpose(proj);
+		worldViewProj = glm::transpose(worldViewProj);
+		memcpy(&uniforms.vr_right_world, &world, sizeof(world));
+		memcpy(&uniforms.vr_right_view, &view, sizeof(view));
+		memcpy(&uniforms.vr_right_proj, &proj, sizeof(proj));
+		memcpy(&uniforms.vr_right_transform, &worldViewProj, sizeof(worldViewProj));
+	}
 
 
 	void* args[] = {
-		&uniforms, &cptr_buffer, &output_surf,
+		&uniforms, &cptr_buffer, 
+		&output_main, &output_vr_left, &output_vr_right,
 		&model->numTriangles, &cptr_positions, &cptr_uvs, &cptr_colors,
 		&cptr_texture
 	};
@@ -142,9 +204,13 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 
 	cuCtxSynchronize();
 
-	cuSurfObjectDestroy(output_surf);
+	cuSurfObjectDestroy(output_main);
+	cuSurfObjectDestroy(output_vr_left);
+	cuSurfObjectDestroy(output_vr_right);
 	cuGraphicsUnmapResources(dynamic_resources.size(), dynamic_resources.data(), ((CUstream)CU_STREAM_DEFAULT));
-	cuGraphicsUnregisterResource(cugl_colorbuffer);
+	cuGraphicsUnregisterResource(cugl_main);
+	cuGraphicsUnregisterResource(cugl_vr_left);
+	cuGraphicsUnregisterResource(cugl_vr_right);
 
 
 }
@@ -177,7 +243,9 @@ void initCudaProgram(
 	cuEventCreate(&cevent_start, 0);
 	cuEventCreate(&cevent_end, 0);
 
-	cuGraphicsGLRegisterImage(&cugl_colorbuffer, renderer->view.framebuffer->colorAttachments[0]->handle, GL_TEXTURE_2D, CU_GRAPHICS_REGISTER_FLAGS_WRITE_DISCARD);
+	// cuGraphicsGLRegisterImage(&cugl_main, renderer->view.framebuffer->colorAttachments[0]->handle, GL_TEXTURE_2D, CU_GRAPHICS_REGISTER_FLAGS_WRITE_DISCARD);
+	// cuGraphicsGLRegisterImage(&cugl_vr_left, viewLeft.framebuffer->colorAttachments[0]->handle, GL_TEXTURE_2D, CU_GRAPHICS_REGISTER_FLAGS_WRITE_DISCARD);
+	// cuGraphicsGLRegisterImage(&cugl_vr_right, viewRight.framebuffer->colorAttachments[0]->handle, GL_TEXTURE_2D, CU_GRAPHICS_REGISTER_FLAGS_WRITE_DISCARD);
 }
 
 
@@ -193,10 +261,7 @@ int main(){
 	renderer->controls->radius = 6.0;
 	renderer->controls->target = {0.0f, 0.0f, 0.0f};
 
-	View viewLeft;
 	viewLeft.framebuffer = renderer->createFramebuffer(128, 128);
-
-	View viewRight;
 	viewRight.framebuffer = renderer->createFramebuffer(128, 128);
 
 	ovr = OpenVRHelper::instance();
@@ -232,6 +297,15 @@ int main(){
 		if(ovr->isActive()){
 			ovr->updatePose();
 			ovr->processEvents();
+
+			auto size = ovr->getRecommmendedRenderTargetSize();
+			viewLeft.framebuffer->setSize(size[0], size[1]);
+			viewRight.framebuffer->setSize(size[0], size[1]);
+
+			glBindFramebuffer(GL_FRAMEBUFFER, viewLeft.framebuffer->handle);
+			glViewport(0, 0, size[0], size[1]);
+			glBindFramebuffer(GL_FRAMEBUFFER, viewRight.framebuffer->handle);
+			glViewport(0, 0, size[0], size[1]);
 
 			float near = 0.1;
 			float far = 100'000.0;
@@ -300,19 +374,13 @@ int main(){
 
 		if(ovr->isActive()){
 			
-			auto size = ovr->getRecommmendedRenderTargetSize();
-			viewLeft.framebuffer->setSize(size[0], size[1]);
-			viewRight.framebuffer->setSize(size[0], size[1]);
+			// glBindFramebuffer(GL_FRAMEBUFFER, viewLeft.framebuffer->handle);
+			// glClearColor(0.8, 0.2, 0.3, 1.0);
+			// glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-			glBindFramebuffer(GL_FRAMEBUFFER, viewLeft.framebuffer->handle);
-			glClearColor(0.8, 0.2, 0.3, 1.0);
-			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-			glBindFramebuffer(GL_FRAMEBUFFER, viewRight.framebuffer->handle);
-			glClearColor(0.2, 0.8, 0.3, 1.0);
-			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-			
+			// glBindFramebuffer(GL_FRAMEBUFFER, viewRight.framebuffer->handle);
+			// glClearColor(0.2, 0.8, 0.3, 1.0);
+			// glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 			ovr->submit(viewLeft.framebuffer->colorAttachments[0]->handle, viewRight.framebuffer->colorAttachments[0]->handle);
 			ovr->postPresentHandoff();
