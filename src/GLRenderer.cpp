@@ -207,6 +207,8 @@ shared_ptr<Framebuffer> GLRenderer::createFramebuffer(int width, int height) {
 		cout << "framebuffer incomplete" << endl;
 	}
 
+	framebuffer->setSize(width, height);
+
 	return framebuffer;
 }
 

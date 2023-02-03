@@ -221,7 +221,7 @@ void initCudaProgram(
 	vector<uint32_t>& texture
 ){
 
-	cuMemAlloc(&cptr_buffer, 100'000'000);
+	cuMemAlloc(&cptr_buffer, 500'000'000);
 
 	int numVertices = model->numTriangles * 3;
 	cuMemAlloc(&cptr_positions, numVertices * 12);
@@ -261,6 +261,8 @@ int main(){
 	renderer->controls->radius = 6.0;
 	renderer->controls->target = {0.0f, 0.0f, 0.0f};
 
+	//viewLeft.framebuffer = renderer->createFramebuffer(3000, 4000);
+	//viewRight.framebuffer = renderer->createFramebuffer(3000, 4000);
 	viewLeft.framebuffer = renderer->createFramebuffer(128, 128);
 	viewRight.framebuffer = renderer->createFramebuffer(128, 128);
 
@@ -298,14 +300,87 @@ int main(){
 			ovr->updatePose();
 			ovr->processEvents();
 
-			auto size = ovr->getRecommmendedRenderTargetSize();
-			viewLeft.framebuffer->setSize(size[0], size[1]);
-			viewRight.framebuffer->setSize(size[0], size[1]);
+			auto size = ovr->getRecommmendedRenderTargetSize();	
+			int width = size[0];
+			int height = size[1];
+
+			bool needsResizeX = viewLeft.framebuffer->width != width;
+			bool needsResizeY = viewLeft.framebuffer->height != height;
+			bool needsResize = needsResizeX || needsResizeY;
+
+			// viewLeft.framebuffer->width = width;
+			// viewLeft.framebuffer->height = height;
+			// viewRight.framebuffer->width = width;
+			// viewRight.framebuffer->height = height;
+
+			viewLeft.framebuffer->setSize(width, height);
+			viewRight.framebuffer->setSize(width, height);
+
+			// glm::inverse
+
+			// if(needsResize)
+			// {
+			// 	GLuint dummy;
+			// 	glCreateTextures(GL_TEXTURE_2D, 1, &dummy);
+			// 	// glCreateTextures(GL_TEXTURE_2D, 1, &dummy);
+			// 	// glCreateTextures(GL_TEXTURE_2D, 1, &dummy);
+			// 	// glCreateTextures(GL_TEXTURE_2D, 1, &dummy);
+			// 	// glCreateTextures(GL_TEXTURE_2D, 1, &dummy);
+
+			// 	GLuint newHandles[4];
+			// 	glCreateTextures(GL_TEXTURE_2D, 4, newHandles);
+
+			// 	GLuint oldHandles[4] = {
+			// 		viewLeft.framebuffer->colorAttachments[0]->handle,
+			// 		viewLeft.framebuffer->depth->handle,
+			// 		viewRight.framebuffer->colorAttachments[0]->handle,
+			// 		viewRight.framebuffer->depth->handle
+			// 	};
+
+			// 	vector<shared_ptr<Texture>> textures;
+			// 	textures.push_back(viewLeft.framebuffer->colorAttachments[0]);
+			// 	textures.push_back(viewLeft.framebuffer->depth);
+			// 	textures.push_back(viewRight.framebuffer->colorAttachments[0]);
+			// 	textures.push_back(viewRight.framebuffer->depth);
+
+			// 	for(int i = 0; i < 4; i++){
+			// 		auto texture = textures[i];
+			// 		texture->handle = newHandles[i];
+
+			// 		glTextureParameteri(texture->handle, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+			// 		glTextureParameteri(texture->handle, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+			// 		glTextureParameteri(texture->handle, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+			// 		glTextureParameteri(texture->handle, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+			// 		glTextureStorage2D(texture->handle, 1, texture->colorType, width, height);
+
+			// 		texture->width = width;
+			// 		texture->height = height;
+			// 	}
+
+			// 	glNamedFramebufferTexture(viewLeft.framebuffer->handle, GL_COLOR_ATTACHMENT0, textures[0]->handle, 0);
+			// 	glNamedFramebufferTexture(viewLeft.framebuffer->handle, GL_DEPTH_ATTACHMENT, textures[1]->handle, 0);
+			// 	glNamedFramebufferTexture(viewRight.framebuffer->handle, GL_COLOR_ATTACHMENT0, textures[2]->handle, 0);
+			// 	glNamedFramebufferTexture(viewRight.framebuffer->handle, GL_DEPTH_ATTACHMENT, textures[3]->handle, 0);
+
+			// 	viewLeft.framebuffer->width = width;
+			// 	viewLeft.framebuffer->height = height;
+			// 	viewRight.framebuffer->width = width;
+			// 	viewRight.framebuffer->height = height;
+
+			// 	//glDeleteTextures(1, &oldHandles[0]);
+			// 	//glDeleteTextures(1, &oldHandles[1]);
+			// 	//glDeleteTextures(1, &oldHandles[2]);
+			// 	//glDeleteTextures(1, &oldHandles[3]);
+			// }
+			// viewLeft.framebuffer->setSize(size[0], size[1]);
+			// viewRight.framebuffer->setSize(size[0], size[1]);
+
+
 
 			glBindFramebuffer(GL_FRAMEBUFFER, viewLeft.framebuffer->handle);
-			glViewport(0, 0, size[0], size[1]);
+			glViewport(0, 0, width, height);
 			glBindFramebuffer(GL_FRAMEBUFFER, viewRight.framebuffer->handle);
-			glViewport(0, 0, size[0], size[1]);
+			glViewport(0, 0, width, height);
 
 			float near = 0.1;
 			float far = 100'000.0;
@@ -382,7 +457,9 @@ int main(){
 			// glClearColor(0.2, 0.8, 0.3, 1.0);
 			// glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-			ovr->submit(viewLeft.framebuffer->colorAttachments[0]->handle, viewRight.framebuffer->colorAttachments[0]->handle);
+			ovr->submit(
+				viewLeft.framebuffer->colorAttachments[0]->handle, 
+				viewRight.framebuffer->colorAttachments[0]->handle);
 			ovr->postPresentHandoff();
 		}
 

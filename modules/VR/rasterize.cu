@@ -42,6 +42,36 @@ mat4 operator*(const mat4& a, const mat4& b){
 	return result;
 }
 
+struct Intersection{
+	float3 position;
+	float distance;
+	
+	bool intersects(){
+		return distance > 0.0f && distance != Infinity;
+	}
+};
+
+Intersection rayPlane(float3 origin, float3 direction, float3 planeNormal, float planeDistance){
+
+	float denominator = dot(planeNormal, direction);
+
+	if(denominator == 0){
+		Intersection I;
+		I.distance = Infinity;
+
+		return I;
+	}else{
+		float distance = - (dot(origin, planeNormal) + planeDistance ) / denominator;
+
+		Intersection I;
+		I.distance = distance;
+		I.position = origin + direction * distance;
+
+		return I;
+	}
+
+}
+
 namespace cg = cooperative_groups;
 
 Uniforms uniforms;
@@ -68,6 +98,11 @@ struct RasterizationSettings{
 	Texture* texture = nullptr;
 	int colorMode = COLORMODE_TRIANGLE_ID;
 	mat4 world;
+	mat4 view;
+	mat4 proj;
+	mat4 transform;
+	float width; 
+	float height;
 };
 
 uint32_t sample_nearest(float2 uv, Texture* texture){
@@ -129,7 +164,7 @@ void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, Rasterizati
 	Texture* texture = settings.texture;
 	int colorMode = settings.colorMode;
 	
-	mat4 transform = uniforms.proj * uniforms.view * settings.world;
+	mat4 transform = settings.proj * settings.view * settings.world;
 
 	uint32_t& processedTriangles = *allocator->alloc<uint32_t*>(4);
 	if(grid.thread_rank() == 0){
@@ -165,8 +200,8 @@ void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, Rasterizati
 				pos.y = pos.y / pos.w;
 
 				float4 imgPos = {
-					(pos.x * 0.5f + 0.5f) * uniforms.width, 
-					(pos.y * 0.5f + 0.5f) * uniforms.height,
+					(pos.x * 0.5f + 0.5f) * settings.width, 
+					(pos.y * 0.5f + 0.5f) * settings.height,
 					pos.z, 
 					pos.w
 				};
@@ -206,10 +241,10 @@ void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, Rasterizati
 			float max_y = max(max(p0.y, p1.y), p2.y);
 
 			// clamp to screen
-			min_x = clamp(min_x, 0.0f, uniforms.width);
-			min_y = clamp(min_y, 0.0f, uniforms.height);
-			max_x = clamp(max_x, 0.0f, uniforms.width);
-			max_y = clamp(max_y, 0.0f, uniforms.height);
+			min_x = clamp(min_x, 0.0f, settings.width);
+			min_y = clamp(min_y, 0.0f, settings.height);
+			max_x = clamp(max_x, 0.0f, settings.width);
+			max_y = clamp(max_y, 0.0f, settings.height);
 
 			int size_x = ceil(max_x) - floor(min_x);
 			int size_y = ceil(max_y) - floor(min_y);
@@ -238,8 +273,8 @@ void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, Rasterizati
 				float v = 1.0 - (s + t);
 
 				int2 pixelCoords = make_int2(pFrag.x, pFrag.y);
-				int pixelID = pixelCoords.x + pixelCoords.y * uniforms.width;
-				pixelID = clamp(pixelID, 0, int(uniforms.width * uniforms.height) - 1);
+				int pixelID = pixelCoords.x + pixelCoords.y * settings.width;
+				pixelID = clamp(pixelID, 0, int(settings.width * settings.height) - 1);
 
 				if(s >= 0.0)
 				if(t >= 0.0)
@@ -340,13 +375,24 @@ void kernel(
 	// allocate framebuffer memory
 	int framebufferSize = int(uniforms.width) * int(uniforms.height) * sizeof(uint64_t);
 	uint64_t* framebuffer = allocator->alloc<uint64_t*>(framebufferSize);
+	uint64_t* fb_vr_left = allocator->alloc<uint64_t*>(int(uniforms.vr_left_width) * int(uniforms.vr_left_height) * sizeof(uint64_t));
+	uint64_t* fb_vr_right = allocator->alloc<uint64_t*>(int(uniforms.vr_right_width) * int(uniforms.vr_right_height) * sizeof(uint64_t));
 
 	// clear framebuffer
 	processRange(0, uniforms.width * uniforms.height, [&](int pixelIndex){
-		// framebuffer[pixelIndex] = 0x7f800000'00332211ull;
 		framebuffer[pixelIndex] = (uint64_t(Infinity) << 32ull) | uint64_t(BACKGROUND_COLOR);
 	});
 
+	if(uniforms.vrEnabled){
+		processRange(0, uniforms.vr_left_width * uniforms.vr_left_height, [&](int pixelIndex){
+			fb_vr_left[pixelIndex] = (uint64_t(Infinity) << 32ull) | uint64_t(BACKGROUND_COLOR);
+		});
+
+		processRange(0, uniforms.vr_right_width * uniforms.vr_right_height, [&](int pixelIndex){
+			fb_vr_right[pixelIndex] = (uint64_t(Infinity) << 32ull) | uint64_t(BACKGROUND_COLOR);
+		});
+	}
+	
 	grid.sync();
 
 	{ // generate and draw a ground plane
@@ -384,16 +430,54 @@ void kernel(
 			triangles->positions[offset + 0] = {s * u0 - s * 0.5f, s * v0 - s * 0.5f, height};
 			triangles->positions[offset + 1] = {s * u1 - s * 0.5f, s * v0 - s * 0.5f, height};
 			triangles->positions[offset + 2] = {s * u1 - s * 0.5f, s * v1 - s * 0.5f, height};
-
 			triangles->positions[offset + 3] = {s * u0 - s * 0.5f, s * v0 - s * 0.5f, height};
 			triangles->positions[offset + 4] = {s * u1 - s * 0.5f, s * v1 - s * 0.5f, height};
 			triangles->positions[offset + 5] = {s * u0 - s * 0.5f, s * v1 - s * 0.5f, height};
+
+			triangles->uvs[offset + 0] = {u0, v0};
+			triangles->uvs[offset + 1] = {u1, v0};
+			triangles->uvs[offset + 2] = {u1, v1};
+			triangles->uvs[offset + 3] = {u0, v0};
+			triangles->uvs[offset + 4] = {u1, v1};
+			triangles->uvs[offset + 5] = {u0, v1};
 		});
+
+		Texture texture;
+		texture.width = 128;
+		texture.height = 128;
+		texture.data = allocator->alloc<uint32_t*>(4 * texture.width * texture.height);
+
+		grid.sync();
+
+		processRange(0, texture.width * texture.height, [&](int index){
+			
+			int x = index % texture.width;
+			int y = index / texture.width;
+
+			uint32_t color;
+			uint8_t* rgba = (uint8_t*)&color;
+
+			rgba[0] = 255.0f * float(x) / float(texture.width);
+			rgba[1] = 255.0f * float(y) / float(texture.height);
+			rgba[2] = 0;
+			rgba[3] = 255;
+
+			texture.data[index] = color;
+
+		});
+
+		grid.sync();
+
 		
 		RasterizationSettings settings;
 		settings.texture = nullptr;
 		settings.colorMode = COLORMODE_TRIANGLE_ID;
 		settings.world = mat4::identity();
+		settings.view = uniforms.view;
+		settings.proj = uniforms.proj;
+		settings.width = uniforms.width;
+		settings.height = uniforms.height;
+		settings.texture = &texture;
 
 		// when drawing time, due to normalization, everything needs to be colored by time
 		// lets draw the ground with non-normalized time as well for consistency
@@ -403,11 +487,37 @@ void kernel(
 			settings.colorMode = COLORMODE_TIME_NORMALIZED;
 		}
 
-		rasterizeTriangles(triangles, framebuffer, settings);
+		settings.colorMode = COLORMODE_UV;
+
+		// rasterizeTriangles(triangles, framebuffer, settings);
+
+		if(uniforms.vrEnabled){
+			settings.view = uniforms.vr_left_view;
+			settings.proj = uniforms.vr_left_proj;
+			settings.width = uniforms.vr_left_width;
+			settings.height = uniforms.vr_left_height;
+			rasterizeTriangles(triangles, fb_vr_left, settings);
+
+			grid.sync();
+
+			settings.view = uniforms.vr_right_view;
+			settings.proj = uniforms.vr_right_proj;
+			settings.width = uniforms.vr_right_width;
+			settings.height = uniforms.vr_right_height;
+			rasterizeTriangles(triangles, fb_vr_right, settings);
+		}else{
+			settings.view = uniforms.view;
+			settings.proj = uniforms.proj;
+			settings.width = uniforms.width;
+			settings.height = uniforms.height;
+
+			rasterizeTriangles(triangles, framebuffer, settings);
+		}
 	}
 
 	grid.sync();
 
+	// if(false)
 	{ // draw the triangle mesh that was passed to this kernel
 		Triangles* triangles = allocator->alloc<Triangles*>(sizeof(Triangles));
 		triangles->numTriangles = numTriangles;
@@ -442,10 +552,40 @@ void kernel(
 			mat4 wiggle_yaw = mat4::rotate(cos(5.0f * uniforms.time) * 0.1f, {0.0f, 0.0f, 1.0f}).transpose();
 			
 			settings.world = translate * wiggle * wiggle_yaw * rot * scale;
+			
+			if(uniforms.vrEnabled){
+				settings.view = uniforms.vr_left_view;
+				settings.proj = uniforms.vr_left_proj;
+				settings.width = uniforms.vr_left_width;
+				settings.height = uniforms.vr_left_height;
+				rasterizeTriangles(triangles, fb_vr_left, settings);
 
-			rasterizeTriangles(triangles, framebuffer, settings);
+				grid.sync();
+
+				settings.view = uniforms.vr_right_view;
+				settings.proj = uniforms.vr_right_proj;
+				settings.width = uniforms.vr_right_width;
+				settings.height = uniforms.vr_right_height;
+				rasterizeTriangles(triangles, fb_vr_right, settings);
+			}else{
+				settings.view = uniforms.view;
+				settings.proj = uniforms.proj;
+				settings.width = uniforms.width;
+				settings.height = uniforms.height;
+
+				rasterizeTriangles(triangles, framebuffer, settings);
+			}
+
+			grid.sync();
 		}
 	}
+
+	// grid.sync();
+
+	// if(uniforms.vrEnabled)
+	// {
+	// 	uniforms.vr_left_view
+	// }
 
 	grid.sync();
 
@@ -474,46 +614,85 @@ void kernel(
 		grid.sync();
 	}
 
-
 	// transfer framebuffer to opengl texture
-	processRange(0, uniforms.width * uniforms.height, [&](int pixelIndex){
+	if(uniforms.vrEnabled){
+		
+		// left
+		processRange(0, uniforms.vr_left_width * uniforms.vr_left_height, [&](int pixelIndex){
+			int x = pixelIndex % int(uniforms.vr_left_width);
+			int y = pixelIndex / int(uniforms.vr_left_width);
 
-		int x = pixelIndex % int(uniforms.width);
-		int y = pixelIndex / int(uniforms.width);
+			uint64_t encoded = fb_vr_left[pixelIndex];
+			uint32_t color = encoded & 0xffffffffull;
 
-		uint64_t encoded = framebuffer[pixelIndex];
-		uint32_t color = encoded & 0xffffffffull;
+			surf2Dwrite(color, gl_colorbuffer_vr_left, x * 4, y);
+		});
 
-		if(uniforms.colorMode == COLORMODE_TIME_NORMALIZED)
-		if(color != BACKGROUND_COLOR)
-		{
-			color = color / (maxNanos / 255);
-		}
+		// right
+		processRange(0, uniforms.vr_right_width * uniforms.vr_right_height, [&](int pixelIndex){
+			int x = pixelIndex % int(uniforms.vr_right_width);
+			int y = pixelIndex / int(uniforms.vr_right_width);
 
+			uint64_t encoded = fb_vr_right[pixelIndex];
+			uint32_t color = encoded & 0xffffffffull;
 
-		surf2Dwrite(color, gl_colorbuffer_main, x * 4, y);
-	});
+			surf2Dwrite(color, gl_colorbuffer_vr_right, x * 4, y);
+		});
 
+		// blit vr displays to main window
+		processRange(0, uniforms.width * uniforms.height, [&](int pixelIndex){
 
-	if(uniforms.vrEnabled)
-	processRange(0, uniforms.vr_left_width * uniforms.vr_left_height, [&](int pixelIndex){
-		int x = pixelIndex % int(uniforms.vr_left_width);
-		int y = pixelIndex / int(uniforms.vr_left_width);
+			int x = pixelIndex % int(uniforms.width);
+			int y = pixelIndex / int(uniforms.width);
 
-		uint32_t color = 0x000000ff;
+			float u = fmodf(2.0 * float(x) / uniforms.width, 1.0f);
+			float v = float(y) / uniforms.height;
 
-		surf2Dwrite(color, gl_colorbuffer_vr_left, x * 4, y);
-	});
+			uint32_t color = 0x000000ff;
+			if(x < uniforms.width / 2.0){
+				int vr_x = u * uniforms.vr_left_width;
+				int vr_y = v * uniforms.vr_left_height;
+				int vr_pixelIndex = vr_x + vr_y * uniforms.vr_left_width;
 
-	if(uniforms.vrEnabled)
-	processRange(0, uniforms.vr_right_width * uniforms.vr_right_height, [&](int pixelIndex){
-		int x = pixelIndex % int(uniforms.vr_right_width);
-		int y = pixelIndex / int(uniforms.vr_right_width);
+				uint64_t encoded = fb_vr_left[vr_pixelIndex];
+				color = encoded & 0xffffffffull;
+			}else{
+				int vr_x = u * uniforms.vr_right_width;
+				int vr_y = v * uniforms.vr_right_height;
+				int vr_pixelIndex = vr_x + vr_y * uniforms.vr_right_width;
 
-		uint32_t color = 0x0000ff00;
+				uint64_t encoded = fb_vr_right[vr_pixelIndex];
+				color = encoded & 0xffffffffull;
+			}
 
-		surf2Dwrite(color, gl_colorbuffer_vr_right, x * 4, y);
-	});
+			if(uniforms.colorMode == COLORMODE_TIME_NORMALIZED)
+			if(color != BACKGROUND_COLOR)
+			{
+				color = color / (maxNanos / 255);
+			}
+
+			surf2Dwrite(color, gl_colorbuffer_main, x * 4, y);
+		});
+
+	}else{
+		// blit custom cuda framebuffer to opengl texture
+		processRange(0, uniforms.width * uniforms.height, [&](int pixelIndex){
+
+			int x = pixelIndex % int(uniforms.width);
+			int y = pixelIndex / int(uniforms.width);
+
+			uint64_t encoded = framebuffer[pixelIndex];
+			uint32_t color = encoded & 0xffffffffull;
+
+			if(uniforms.colorMode == COLORMODE_TIME_NORMALIZED)
+			if(color != BACKGROUND_COLOR)
+			{
+				color = color / (maxNanos / 255);
+			}
+
+			surf2Dwrite(color, gl_colorbuffer_main, x * 4, y);
+		});
+	}
 
 
 }
