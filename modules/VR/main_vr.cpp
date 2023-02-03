@@ -154,6 +154,22 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 		memcpy(&uniforms.vr_left_view, &view, sizeof(view));
 		memcpy(&uniforms.vr_left_proj, &proj, sizeof(proj));
 		memcpy(&uniforms.vr_left_transform, &worldViewProj, sizeof(worldViewProj));
+
+		if(ovr->isActive()){
+			Pose poseLeft = ovr->getLeftControllerPose();
+			uniforms.vr_left_controller_active = poseLeft.valid;
+			if(poseLeft.valid){
+				glm::mat4 transform = poseLeft.transform;
+				memcpy(&uniforms.vr_left_controller_pose, &transform, sizeof(transform));
+			}
+
+			Pose poseRight = ovr->getRightControllerPose();
+			uniforms.vr_right_controller_active = poseRight.valid;
+			if(poseRight.valid){
+				glm::mat4 transform = poseRight.transform;
+				memcpy(&uniforms.vr_right_controller_pose, &transform, sizeof(transform));
+			}
+		}
 	}
 
 	{ // world view proj VR RIGHT
@@ -308,74 +324,8 @@ int main(){
 			bool needsResizeY = viewLeft.framebuffer->height != height;
 			bool needsResize = needsResizeX || needsResizeY;
 
-			// viewLeft.framebuffer->width = width;
-			// viewLeft.framebuffer->height = height;
-			// viewRight.framebuffer->width = width;
-			// viewRight.framebuffer->height = height;
-
 			viewLeft.framebuffer->setSize(width, height);
 			viewRight.framebuffer->setSize(width, height);
-
-			// glm::inverse
-
-			// if(needsResize)
-			// {
-			// 	GLuint dummy;
-			// 	glCreateTextures(GL_TEXTURE_2D, 1, &dummy);
-			// 	// glCreateTextures(GL_TEXTURE_2D, 1, &dummy);
-			// 	// glCreateTextures(GL_TEXTURE_2D, 1, &dummy);
-			// 	// glCreateTextures(GL_TEXTURE_2D, 1, &dummy);
-			// 	// glCreateTextures(GL_TEXTURE_2D, 1, &dummy);
-
-			// 	GLuint newHandles[4];
-			// 	glCreateTextures(GL_TEXTURE_2D, 4, newHandles);
-
-			// 	GLuint oldHandles[4] = {
-			// 		viewLeft.framebuffer->colorAttachments[0]->handle,
-			// 		viewLeft.framebuffer->depth->handle,
-			// 		viewRight.framebuffer->colorAttachments[0]->handle,
-			// 		viewRight.framebuffer->depth->handle
-			// 	};
-
-			// 	vector<shared_ptr<Texture>> textures;
-			// 	textures.push_back(viewLeft.framebuffer->colorAttachments[0]);
-			// 	textures.push_back(viewLeft.framebuffer->depth);
-			// 	textures.push_back(viewRight.framebuffer->colorAttachments[0]);
-			// 	textures.push_back(viewRight.framebuffer->depth);
-
-			// 	for(int i = 0; i < 4; i++){
-			// 		auto texture = textures[i];
-			// 		texture->handle = newHandles[i];
-
-			// 		glTextureParameteri(texture->handle, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-			// 		glTextureParameteri(texture->handle, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-			// 		glTextureParameteri(texture->handle, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-			// 		glTextureParameteri(texture->handle, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-			// 		glTextureStorage2D(texture->handle, 1, texture->colorType, width, height);
-
-			// 		texture->width = width;
-			// 		texture->height = height;
-			// 	}
-
-			// 	glNamedFramebufferTexture(viewLeft.framebuffer->handle, GL_COLOR_ATTACHMENT0, textures[0]->handle, 0);
-			// 	glNamedFramebufferTexture(viewLeft.framebuffer->handle, GL_DEPTH_ATTACHMENT, textures[1]->handle, 0);
-			// 	glNamedFramebufferTexture(viewRight.framebuffer->handle, GL_COLOR_ATTACHMENT0, textures[2]->handle, 0);
-			// 	glNamedFramebufferTexture(viewRight.framebuffer->handle, GL_DEPTH_ATTACHMENT, textures[3]->handle, 0);
-
-			// 	viewLeft.framebuffer->width = width;
-			// 	viewLeft.framebuffer->height = height;
-			// 	viewRight.framebuffer->width = width;
-			// 	viewRight.framebuffer->height = height;
-
-			// 	//glDeleteTextures(1, &oldHandles[0]);
-			// 	//glDeleteTextures(1, &oldHandles[1]);
-			// 	//glDeleteTextures(1, &oldHandles[2]);
-			// 	//glDeleteTextures(1, &oldHandles[3]);
-			// }
-			// viewLeft.framebuffer->setSize(size[0], size[1]);
-			// viewRight.framebuffer->setSize(size[0], size[1]);
-
-
 
 			glBindFramebuffer(GL_FRAMEBUFFER, viewLeft.framebuffer->handle);
 			glViewport(0, 0, width, height);
@@ -397,6 +347,8 @@ int main(){
 
 			viewRight.view = glm::inverse(flip * poseHMD * poseRight);
 			viewRight.proj = ovr->getProjection(vr::Hmd_Eye::Eye_Right, 0.01, 10'000.0);
+
+			
 		}
 		
 	};

@@ -113,6 +113,8 @@ struct Uniforms{
 	mat4 vr_left_view;
 	mat4 vr_left_proj;
 	mat4 vr_left_transform;
+	bool vr_left_controller_active;
+	mat4 vr_left_controller_pose;
 
 	float vr_right_width;
 	float vr_right_height;
@@ -120,4 +122,8 @@ struct Uniforms{
 	mat4 vr_right_view;
 	mat4 vr_right_proj;
 	mat4 vr_right_transform;
+	bool vr_right_controller_active;
+	mat4 vr_right_controller_pose;
+
+
 };

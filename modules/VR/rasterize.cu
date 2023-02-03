@@ -198,6 +198,7 @@ void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, Rasterizati
 
 				pos.x = pos.x / pos.w;
 				pos.y = pos.y / pos.w;
+				// pos.z = pos.z / pos.w;
 
 				float4 imgPos = {
 					(pos.x * 0.5f + 0.5f) * settings.width, 
@@ -284,13 +285,16 @@ void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, Rasterizati
 					uint8_t* v1_rgba = (uint8_t*)&triangles->colors[i1];
 					uint8_t* v2_rgba = (uint8_t*)&triangles->colors[i2];
 
-					float2 v0_uv = triangles->uvs[i0];
-					float2 v1_uv = triangles->uvs[i1];
-					float2 v2_uv = triangles->uvs[i2];
+					float2 v0_uv = triangles->uvs[i0] / p0.z;
+					float2 v1_uv = triangles->uvs[i1] / p1.z;
+					float2 v2_uv = triangles->uvs[i2] / p2.z;
 					float2 uv = {
 						v * v0_uv.x + s * v1_uv.x + t * v2_uv.x,
 						v * v0_uv.y + s * v1_uv.y + t * v2_uv.y
 					};
+					float repz = v * (1.0f / p0.z) + s * (1.0f / p1.z) + t * (1.0f / p2.z);
+					uv.x = uv.x / repz;
+					uv.y = uv.y / repz;
 
 					uint32_t color;
 					uint8_t* rgb = (uint8_t*)&color;
@@ -443,8 +447,8 @@ void kernel(
 		});
 
 		Texture texture;
-		texture.width = 128;
-		texture.height = 128;
+		texture.width = 512;
+		texture.height = 512;
 		texture.data = allocator->alloc<uint32_t*>(4 * texture.width * texture.height);
 
 		grid.sync();
@@ -457,10 +461,16 @@ void kernel(
 			uint32_t color;
 			uint8_t* rgba = (uint8_t*)&color;
 
-			rgba[0] = 255.0f * float(x) / float(texture.width);
-			rgba[1] = 255.0f * float(y) / float(texture.height);
-			rgba[2] = 0;
-			rgba[3] = 255;
+			if((x % 16) == 0 || (y % 16) == 0){
+				color = 0x00000000;
+			}else{
+				color = 0x00aaaaaa;
+			}
+
+			// rgba[0] = 255.0f * float(x) / float(texture.width);
+			// rgba[1] = 255.0f * float(y) / float(texture.height);
+			// rgba[2] = 0;
+			// rgba[3] = 255;
 
 			texture.data[index] = color;
 
@@ -487,7 +497,7 @@ void kernel(
 			settings.colorMode = COLORMODE_TIME_NORMALIZED;
 		}
 
-		settings.colorMode = COLORMODE_UV;
+		settings.colorMode = COLORMODE_TEXTURE;
 
 		// rasterizeTriangles(triangles, framebuffer, settings);
 
@@ -537,36 +547,54 @@ void kernel(
 		settings.world = uniforms.world;
 
 		// rasterizeTriangles(triangles, framebuffer, settings);
-		
-		// 5x5 instances at specified offsets
-		for(float ox : {-3.0f, -1.5f, 0.0f, 1.5f, 3.0f})
-		for(float oy : {-3.0f, -1.5f, 0.0f, 1.5f, 3.0f})
 		{
-
-			// float s = 1.0 - length(float2{ox, oy}) / 6.0;
 			float s = 0.8f;
 			mat4 rot = mat4::rotate(0.5f * PI, {1.0f, 0.0f, 0.0f}).transpose();
-			mat4 translate = mat4::translate(ox, oy, 0.0f);
+			mat4 translate = mat4::identity();
 			mat4 scale = mat4::scale(s, s, s);
 			mat4 wiggle = mat4::rotate(cos(5.0f * uniforms.time) * 0.1f, {0.0f, 1.0f, 0.0f}).transpose();
 			mat4 wiggle_yaw = mat4::rotate(cos(5.0f * uniforms.time) * 0.1f, {0.0f, 0.0f, 1.0f}).transpose();
 			
 			settings.world = translate * wiggle * wiggle_yaw * rot * scale;
+
 			
 			if(uniforms.vrEnabled){
-				settings.view = uniforms.vr_left_view;
-				settings.proj = uniforms.vr_left_proj;
-				settings.width = uniforms.vr_left_width;
-				settings.height = uniforms.vr_left_height;
-				rasterizeTriangles(triangles, fb_vr_left, settings);
 
-				grid.sync();
+				if(uniforms.vr_left_controller_active){
+					settings.world = rot * uniforms.vr_left_controller_pose.transpose() * mat4::scale(0.1f, 0.1f, 0.1f);
 
-				settings.view = uniforms.vr_right_view;
-				settings.proj = uniforms.vr_right_proj;
-				settings.width = uniforms.vr_right_width;
-				settings.height = uniforms.vr_right_height;
-				rasterizeTriangles(triangles, fb_vr_right, settings);
+					settings.view = uniforms.vr_left_view;
+					settings.proj = uniforms.vr_left_proj;
+					settings.width = uniforms.vr_left_width;
+					settings.height = uniforms.vr_left_height;
+					rasterizeTriangles(triangles, fb_vr_left, settings);
+
+					grid.sync();
+
+					settings.view = uniforms.vr_right_view;
+					settings.proj = uniforms.vr_right_proj;
+					settings.width = uniforms.vr_right_width;
+					settings.height = uniforms.vr_right_height;
+					rasterizeTriangles(triangles, fb_vr_right, settings);
+				}
+
+				if(uniforms.vr_right_controller_active){
+					settings.world = rot * uniforms.vr_right_controller_pose.transpose() * mat4::scale(0.1f, 0.1f, 0.1f);
+
+					settings.view = uniforms.vr_left_view;
+					settings.proj = uniforms.vr_left_proj;
+					settings.width = uniforms.vr_left_width;
+					settings.height = uniforms.vr_left_height;
+					rasterizeTriangles(triangles, fb_vr_left, settings);
+
+					grid.sync();
+
+					settings.view = uniforms.vr_right_view;
+					settings.proj = uniforms.vr_right_proj;
+					settings.width = uniforms.vr_right_width;
+					settings.height = uniforms.vr_right_height;
+					rasterizeTriangles(triangles, fb_vr_right, settings);
+				}
 			}else{
 				settings.view = uniforms.view;
 				settings.proj = uniforms.proj;
