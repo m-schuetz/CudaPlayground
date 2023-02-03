@@ -237,7 +237,9 @@ void initCudaProgram(
 	vector<uint32_t>& texture
 ){
 
-	cuMemAlloc(&cptr_buffer, 500'000'000);
+	uint64_t bufferSize = 1'000'000'000;
+	cuMemAlloc(&cptr_buffer, bufferSize);
+	cuMemsetD8(cptr_buffer, 0, bufferSize); 
 
 	int numVertices = model->numTriangles * 3;
 	cuMemAlloc(&cptr_positions, numVertices * 12);

@@ -6,6 +6,12 @@
 #include "helper_math.h"
 #include "HostDeviceInterface.h"
 
+constexpr uint32_t gridSize = 128;
+constexpr float fGridSize = gridSize;
+constexpr uint32_t numCells = gridSize * gridSize * gridSize;
+constexpr float3 gridMin = { 0.0f, -1.0f, 0.5f};
+constexpr float3 gridMax = { 1.0f, 1.0f, 1.5f};
+
 float4 operator*(const mat4& a, const float4& b){
 	return make_float4(
 		dot(a.rows[0], b),
@@ -376,12 +382,26 @@ void kernel(
 	Allocator _allocator(buffer, 0);
 	allocator = &_allocator;
 
+	uint32_t* voxelGrid = allocator->alloc<uint32_t*>(numCells * sizeof(uint32_t));
+
+	// processRange(0, numCells, [&](int voxelIndex){
+	// 	int x = voxelIndex % gridSize;
+	// 	int y = voxelIndex % (gridSize * gridSize) / gridSize;
+	// 	int z = voxelIndex / (gridSize * gridSize);
+
+	// 	if(z == 10){
+	// 		voxelGrid[voxelIndex] = 123;
+	// 	}else{
+	// 		voxelGrid[voxelIndex] = 0;
+	// 	}
+	// });
+
 	// allocate framebuffer memory
 	int framebufferSize = int(uniforms.width) * int(uniforms.height) * sizeof(uint64_t);
 	uint64_t* framebuffer = allocator->alloc<uint64_t*>(framebufferSize);
 	uint64_t* fb_vr_left = allocator->alloc<uint64_t*>(int(uniforms.vr_left_width) * int(uniforms.vr_left_height) * sizeof(uint64_t));
 	uint64_t* fb_vr_right = allocator->alloc<uint64_t*>(int(uniforms.vr_right_width) * int(uniforms.vr_right_height) * sizeof(uint64_t));
-
+	
 	// clear framebuffer
 	processRange(0, uniforms.width * uniforms.height, [&](int pixelIndex){
 		framebuffer[pixelIndex] = (uint64_t(Infinity) << 32ull) | uint64_t(BACKGROUND_COLOR);
@@ -608,12 +628,139 @@ void kernel(
 		}
 	}
 
-	// grid.sync();
+	grid.sync();
 
-	// if(uniforms.vrEnabled)
-	// {
-	// 	uniforms.vr_left_view
-	// }
+	if(grid.thread_rank() == 0){
+		
+		mat4 rot = mat4::rotate(0.5f * PI, {1.0f, 0.0f, 0.0f}).transpose();
+		float4 pos = rot * uniforms.vr_right_controller_pose.transpose() * float4{0.0f, 0.0f, 0.0f, 1.0f};
+		float3 boxSize = gridMax - gridMin;
+
+		float fx = gridSize * (pos.x - gridMin.x) / boxSize.x;
+		float fy = gridSize * (pos.y - gridMin.y) / boxSize.y;
+		float fz = gridSize * (pos.z - gridMin.z) / boxSize.z;
+
+		int ix = fx;
+		int iy = fy;
+		int iz = fz;
+		int voxelIndex = ix + iy * gridSize + iz * gridSize * gridSize;
+
+		if(0 <= ix && ix < gridSize)
+		if(0 <= iy && iy < gridSize)
+		if(0 <= iz && iz < gridSize)
+		{
+			voxelGrid[voxelIndex] = 123;
+		}
+
+
+
+	}
+
+	grid.sync();
+
+	{ // draw voxel grid
+
+		float3 boxSize = gridMax - gridMin;
+		mat4 transform = uniforms.proj * uniforms.view;
+
+		struct RenderTarget{
+			mat4 transform;
+			uint64_t* framebuffer;
+			float width;
+			float height;
+		};
+
+		int numTargets;
+		RenderTarget targets[3];
+
+		if(uniforms.vrEnabled){
+			numTargets = 2;
+
+			targets[0].transform = uniforms.vr_left_proj * uniforms.vr_left_view;
+			targets[0].framebuffer = fb_vr_left;
+			targets[0].width = uniforms.vr_left_width;
+			targets[0].height = uniforms.vr_left_height;
+
+			targets[1].transform = uniforms.vr_right_proj * uniforms.vr_right_view;
+			targets[1].framebuffer = fb_vr_right;
+			targets[1].width = uniforms.vr_right_width;
+			targets[1].height = uniforms.vr_right_height;
+		}else{
+			numTargets = 1;
+
+			targets[0].transform = uniforms.proj * uniforms.view;
+			targets[0].framebuffer = framebuffer;
+			targets[0].width = uniforms.width;
+			targets[0].height = uniforms.height;
+		}
+		
+		processRange(0, numCells, [&](int voxelIndex){
+			int vx = voxelIndex % gridSize;
+			int vy = voxelIndex % (gridSize * gridSize) / gridSize;
+			int vz = voxelIndex / (gridSize * gridSize);
+
+			uint32_t value = voxelGrid[voxelIndex];
+
+			if(value != 0){
+
+				float x = (float(vx) / fGridSize) * boxSize.x + gridMin.x;
+				float y = (float(vy) / fGridSize) * boxSize.y + gridMin.y;
+				float z = (float(vz) / fGridSize) * boxSize.z + gridMin.z;
+
+				for(int targetIndex = 0; targetIndex < numTargets; targetIndex++){
+					RenderTarget* target = &targets[targetIndex];
+
+					float4 pos = target->transform * float4{x, y, z, 1.0f};
+					float4 ndc = {
+						pos.x / pos.w, 
+						pos.y / pos.w, 
+						pos.z / pos.w,
+						pos.w
+					};
+
+					float2 screenPos = {
+						(ndc.x * 0.5f + 0.5f) * target->width, 
+						(ndc.y * 0.5f + 0.5f) * target->height,
+					};
+
+					if(0.0f <= screenPos.x && screenPos.x < target->width)
+					if(0.0f <= screenPos.y && screenPos.y < target->height)
+					if(ndc.w > 0.0f){
+
+						int px = screenPos.x;
+						int py = screenPos.y;
+						int pixelID = px + py * target->width;
+
+						uint64_t color = 0x000000ff;
+						uint64_t idepth = *((uint32_t*)&pos.w);
+						uint64_t pixel = (idepth << 32) | color;
+
+
+						// atomicMin(&target->framebuffer[pixelID + 0], pixel);
+
+						for(int ox : {-2, -1, 0, 1, 2})
+						for(int oy : {-2, -1, 0, 1, 2})
+						{
+							
+							if(!((0 <= px + ox) && (px + ox < target->width))) continue;
+							if(!((0 <= py + oy) && (py + oy < target->height))) continue;
+
+							atomicMin(&target->framebuffer[pixelID + ox + oy * int(target->width)], pixel);
+						}
+						
+
+
+					}
+				}
+				
+
+
+			}
+
+
+		});
+
+	}
 
 	grid.sync();
 
