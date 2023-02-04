@@ -130,14 +130,25 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 		glm::mat4 view = renderer->camera->view;
 		glm::mat4 proj = renderer->camera->proj;
 		glm::mat4 worldViewProj = proj * view * world;
+		glm::mat4 view_inv = glm::inverse(view);
+		glm::mat4 proj_inv = glm::inverse(proj);
+
 		world = glm::transpose(world);
 		view = glm::transpose(view);
 		proj = glm::transpose(proj);
 		worldViewProj = glm::transpose(worldViewProj);
+		view_inv = glm::transpose(view_inv);
+		proj_inv = glm::transpose(proj_inv);
+
 		memcpy(&uniforms.world, &world, sizeof(world));
 		memcpy(&uniforms.view, &view, sizeof(view));
 		memcpy(&uniforms.proj, &proj, sizeof(proj));
+		memcpy(&uniforms.view_inv, &view_inv, sizeof(view_inv));
+		memcpy(&uniforms.proj_inv, &proj_inv, sizeof(proj_inv));
 		memcpy(&uniforms.transform, &worldViewProj, sizeof(worldViewProj));
+
+
+		glm::inverse(view);
 	}
 
 	{ // world view proj VR LEFT

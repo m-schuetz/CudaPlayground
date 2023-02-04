@@ -1,6 +1,7 @@
 /// @ref core
 /// @file glm/detail/func_matrix.inl
 
+#include <iostream>
 #include "../geometric.hpp"
 #include <limits>
 
@@ -349,6 +350,44 @@ namespace detail
 			T Dot1 = (Dot0.x + Dot0.y) + (Dot0.z + Dot0.w);
 
 			T OneOverDeterminant = static_cast<T>(1) / Dot1;
+
+
+			// std::cout << "==============" << std::endl;
+			// std::cout << "Coef00 = " << Coef00 << std::endl;
+			// std::cout << "Coef02 = " << Coef02 << std::endl;
+			// std::cout << "Coef03 = " << Coef03 << std::endl;
+			// std::cout << "Coef04 = " << Coef04 << std::endl;
+			// std::cout << "Coef06 = " << Coef06 << std::endl;
+			// std::cout << "Coef07 = " << Coef07 << std::endl;
+			// std::cout << "Coef08 = " << Coef08 << std::endl;
+			// std::cout << "Coef10 = " << Coef10 << std::endl;
+			// std::cout << "Coef11 = " << Coef11 << std::endl;
+			// std::cout << "Coef12 = " << Coef12 << std::endl;
+			// std::cout << "Coef14 = " << Coef14 << std::endl;
+			// std::cout << "Coef15 = " << Coef15 << std::endl;
+			// std::cout << "Coef16 = " << Coef16 << std::endl;
+			// std::cout << "Coef18 = " << Coef18 << std::endl;
+			// std::cout << "Coef19 = " << Coef19 << std::endl;
+			// std::cout << "Coef20 = " << Coef20 << std::endl;
+			// std::cout << "Coef22 = " << Coef22 << std::endl;
+			// std::cout << "Coef23 = " << Coef23 << std::endl;
+			
+			// std::cout << "Fac0: " << Fac0.x << ", " << Fac0.y << ", " << Fac0.z << ", " << Fac0.w << std::endl;
+			// std::cout << "Fac1: " << Fac1.x << ", " << Fac1.y << ", " << Fac1.z << ", " << Fac1.w << std::endl;
+			// std::cout << "Fac2: " << Fac2.x << ", " << Fac2.y << ", " << Fac2.z << ", " << Fac2.w << std::endl;
+			// std::cout << "Fac3: " << Fac3.x << ", " << Fac3.y << ", " << Fac3.z << ", " << Fac3.w << std::endl;
+			// std::cout << "Fac4: " << Fac4.x << ", " << Fac4.y << ", " << Fac4.z << ", " << Fac4.w << std::endl;
+			// std::cout << "Fac5: " << Fac5.x << ", " << Fac5.y << ", " << Fac5.z << ", " << Fac5.w << std::endl;
+
+			// std::cout << "Vec0: " << Vec0.x << ", " << Vec0.y << ", " << Vec0.z << ", " << Vec0.w << std::endl;
+			// std::cout << "Vec1: " << Vec1.x << ", " << Vec1.y << ", " << Vec1.z << ", " << Vec1.w << std::endl;
+			// std::cout << "Vec2: " << Vec2.x << ", " << Vec2.y << ", " << Vec2.z << ", " << Vec2.w << std::endl;
+			// std::cout << "Vec3: " << Vec3.x << ", " << Vec3.y << ", " << Vec3.z << ", " << Vec3.w << std::endl;
+
+			// std::cout << "Inv0: " << Inv0.x << ", " << Inv0.y << ", " << Inv0.z << ", " << Inv0.w << std::endl;
+			// std::cout << "Inv1: " << Inv1.x << ", " << Inv1.y << ", " << Inv1.z << ", " << Inv1.w << std::endl;
+			// std::cout << "Inv2: " << Inv2.x << ", " << Inv2.y << ", " << Inv2.z << ", " << Inv2.w << std::endl;
+			// std::cout << "Inv3: " << Inv3.x << ", " << Inv3.y << ", " << Inv3.z << ", " << Inv3.w << std::endl;
 
 			return Inverse * OneOverDeterminant;
 		}

@@ -9,8 +9,17 @@
 constexpr uint32_t gridSize = 128;
 constexpr float fGridSize = gridSize;
 constexpr uint32_t numCells = gridSize * gridSize * gridSize;
-constexpr float3 gridMin = { 0.0f, -1.0f, 0.5f};
+constexpr float3 gridMin = { -1.0f, -1.0f, 0.5f};
 constexpr float3 gridMax = { 1.0f, 1.0f, 1.5f};
+
+struct RenderTarget{
+	mat4 view;
+	mat4 proj;
+	mat4 transform;
+	uint64_t* framebuffer;
+	float width;
+	float height;
+};
 
 float4 operator*(const mat4& a, const float4& b){
 	return make_float4(
@@ -236,10 +245,10 @@ void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, Rasterizati
 
 			auto cross = [](float2 a, float2 b){ return a.x * b.y - a.y * b.x; };
 
-			{// backface culling
-				float w = cross(v01, v02);
-				if(w < 0.0) continue;
-			}
+			// {// backface culling
+			// 	float w = cross(v01, v02);
+			// 	if(w < 0.0) continue;
+			// }
 
 			// compute screen-space bounding rectangle
 			float min_x = min(min(p0.x, p1.x), p2.x);
@@ -359,6 +368,124 @@ void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, Rasterizati
 	}
 }
 
+void rasterizeVoxels(
+	int gridSize, 
+	int numCells, 
+	uint32_t* voxelGrid,
+	int numTargets,
+	RenderTarget* targets
+){
+
+	float3 boxSize = gridMax - gridMin;
+
+	float voxelSize = boxSize.x / float(gridSize);
+	
+	processRange(0, numCells, [&](int voxelIndex){
+		int vx = voxelIndex % gridSize;
+		int vy = voxelIndex % (gridSize * gridSize) / gridSize;
+		int vz = voxelIndex / (gridSize * gridSize);
+
+		uint32_t value = voxelGrid[voxelIndex];
+
+		if(value != 0){
+
+			float x = (float(vx) / fGridSize) * boxSize.x + gridMin.x;
+			float y = (float(vy) / fGridSize) * boxSize.y + gridMin.y;
+			float z = (float(vz) / fGridSize) * boxSize.z + gridMin.z;
+
+			for(int targetIndex = 0; targetIndex < numTargets; targetIndex++){
+				RenderTarget* target = &targets[targetIndex];
+
+				float4 pos = target->transform * float4{x, y, z, 1.0f};
+				
+				float4 pos_off = target->view * float4{x, y, z, 1.0f};
+				pos_off.x += voxelSize;
+				pos_off = target->proj * pos_off;
+
+				float4 ndc = {
+					pos.x / pos.w, 
+					pos.y / pos.w, 
+					pos.z / pos.w,
+					pos.w
+				};
+				float4 ndc_off = {
+					pos_off.x / pos.w, 
+					pos_off.y / pos.w, 
+					pos_off.z / pos.w,
+					pos_off.w
+				};
+
+				float2 screenPos = {
+					(ndc.x * 0.5f + 0.5f) * target->width, 
+					(ndc.y * 0.5f + 0.5f) * target->height,
+				};
+				float2 screenPos_off = {
+					(ndc_off.x * 0.5f + 0.5f) * target->width, 
+					(ndc_off.y * 0.5f + 0.5f) * target->height,
+				};
+
+				float voxelSize_screen = abs(screenPos_off.x - screenPos.x);
+				voxelSize_screen = clamp(voxelSize_screen, 1.0f, 50.0f);
+
+				if(0.0f <= screenPos.x && screenPos.x < target->width)
+				if(0.0f <= screenPos.y && screenPos.y < target->height)
+				if(ndc.w > 0.0f){
+
+					int px = screenPos.x;
+					int py = screenPos.y;
+					int pixelID = px + py * target->width;
+
+					uint64_t color = 0x000000ff;
+					uint64_t idepth = *((uint32_t*)&pos.w);
+
+					int spriteRadius = voxelSize_screen / 2.0f + 1.0f;
+					// int spriteRadius = 4;
+					int spriteSize = 2 * spriteRadius + 1;
+					for(int ox = -spriteRadius; ox <= spriteRadius; ox++)
+					for(int oy = -spriteRadius; oy <= spriteRadius; oy++)
+					{
+						float u = float(ox) / spriteRadius;
+						float v = float(oy) / spriteRadius;
+						float dd = u * u + v * v;
+
+						if(dd > 1.0f) continue;
+
+						float d = sqrt(d);
+
+						uint32_t color;
+						uint8_t* rgba = (uint8_t*)&color;
+						rgba[0] = 255 * u;
+						rgba[1] = 255 * v;
+						rgba[2] = 0;
+
+						float w = dd;
+						rgba[0] = 255 - 200 * w;
+						rgba[1] = 255 - 200 * w;
+						rgba[2] = 255 - 200 * w;
+						rgba[3] = 0;
+
+						float fragdepth = pos.w + dd * voxelSize;
+						uint64_t idepth = *((uint32_t*)&fragdepth);
+     
+ 
+						uint64_t pixel = (idepth << 32) | color;
+						
+						if(!((0 <= px + ox) && (px + ox < target->width))) continue;
+						if(!((0 <= py + oy) && (py + oy < target->height))) continue;
+
+						atomicMin(&target->framebuffer[pixelID + ox + oy * int(target->width)], pixel);
+					}
+					
+   
+
+				}
+			}
+			
+		}
+	});
+
+}
+
 extern "C" __global__
 void kernel(
 	const Uniforms _uniforms,
@@ -384,17 +511,25 @@ void kernel(
 
 	uint32_t* voxelGrid = allocator->alloc<uint32_t*>(numCells * sizeof(uint32_t));
 
-	// processRange(0, numCells, [&](int voxelIndex){
-	// 	int x = voxelIndex % gridSize;
-	// 	int y = voxelIndex % (gridSize * gridSize) / gridSize;
-	// 	int z = voxelIndex / (gridSize * gridSize);
+	processRange(0, numCells, [&](int voxelIndex){
+		int x = voxelIndex % gridSize;
+		int y = voxelIndex % (gridSize * gridSize) / gridSize;
+		int z = voxelIndex / (gridSize * gridSize);
 
-	// 	if(z == 10){
-	// 		voxelGrid[voxelIndex] = 123;
-	// 	}else{
-	// 		voxelGrid[voxelIndex] = 0;
-	// 	}
-	// });
+		float fx = 2.0f * float(x) / fGridSize - 1.0f;
+		float fy = 2.0f * float(y) / fGridSize - 1.0f;
+		float fz = 2.0f * float(z) / fGridSize - 1.0f;
+
+		if(fx * fx + fy * fy + fz * fz < 1.0f){
+			voxelGrid[voxelIndex] = 123;
+		}
+
+		// if(z == 10){
+		// 	voxelGrid[voxelIndex] = 123;
+		// }else{
+		// 	voxelGrid[voxelIndex] = 0;
+		// }
+	});
 
 	// allocate framebuffer memory
 	int framebufferSize = int(uniforms.width) * int(uniforms.height) * sizeof(uint64_t);
@@ -570,7 +705,7 @@ void kernel(
 		{
 			float s = 0.8f;
 			mat4 rot = mat4::rotate(0.5f * PI, {1.0f, 0.0f, 0.0f}).transpose();
-			mat4 translate = mat4::identity();
+			mat4 translate = mat4::translate(0.0f, 0.0f, 0.0f);
 			mat4 scale = mat4::scale(s, s, s);
 			mat4 wiggle = mat4::rotate(cos(5.0f * uniforms.time) * 0.1f, {0.0f, 1.0f, 0.0f}).transpose();
 			mat4 wiggle_yaw = mat4::rotate(cos(5.0f * uniforms.time) * 0.1f, {0.0f, 0.0f, 1.0f}).transpose();
@@ -630,6 +765,7 @@ void kernel(
 
 	grid.sync();
 
+	// VOXEL PAINTING
 	if(grid.thread_rank() == 0){
 		
 		mat4 rot = mat4::rotate(0.5f * PI, {1.0f, 0.0f, 0.0f}).transpose();
@@ -658,29 +794,23 @@ void kernel(
 
 	grid.sync();
 
-	{ // draw voxel grid
 
-		float3 boxSize = gridMax - gridMin;
-		mat4 transform = uniforms.proj * uniforms.view;
-
-		struct RenderTarget{
-			mat4 transform;
-			uint64_t* framebuffer;
-			float width;
-			float height;
-		};
-
+	{ // DRAW VOXELS
 		int numTargets;
 		RenderTarget targets[3];
 
 		if(uniforms.vrEnabled){
 			numTargets = 2;
 
+			targets[0].view = uniforms.vr_left_view;
+			targets[0].proj = uniforms.vr_left_proj;
 			targets[0].transform = uniforms.vr_left_proj * uniforms.vr_left_view;
 			targets[0].framebuffer = fb_vr_left;
 			targets[0].width = uniforms.vr_left_width;
 			targets[0].height = uniforms.vr_left_height;
 
+			targets[1].view = uniforms.vr_right_view;
+			targets[1].proj = uniforms.vr_right_proj;
 			targets[1].transform = uniforms.vr_right_proj * uniforms.vr_right_view;
 			targets[1].framebuffer = fb_vr_right;
 			targets[1].width = uniforms.vr_right_width;
@@ -688,77 +818,16 @@ void kernel(
 		}else{
 			numTargets = 1;
 
+			targets[0].view = uniforms.view;
+			targets[0].proj = uniforms.proj;
 			targets[0].transform = uniforms.proj * uniforms.view;
 			targets[0].framebuffer = framebuffer;
 			targets[0].width = uniforms.width;
 			targets[0].height = uniforms.height;
 		}
-		
-		processRange(0, numCells, [&](int voxelIndex){
-			int vx = voxelIndex % gridSize;
-			int vy = voxelIndex % (gridSize * gridSize) / gridSize;
-			int vz = voxelIndex / (gridSize * gridSize);
 
-			uint32_t value = voxelGrid[voxelIndex];
+		rasterizeVoxels(gridSize, numCells, voxelGrid, numTargets, targets);
 
-			if(value != 0){
-
-				float x = (float(vx) / fGridSize) * boxSize.x + gridMin.x;
-				float y = (float(vy) / fGridSize) * boxSize.y + gridMin.y;
-				float z = (float(vz) / fGridSize) * boxSize.z + gridMin.z;
-
-				for(int targetIndex = 0; targetIndex < numTargets; targetIndex++){
-					RenderTarget* target = &targets[targetIndex];
-
-					float4 pos = target->transform * float4{x, y, z, 1.0f};
-					float4 ndc = {
-						pos.x / pos.w, 
-						pos.y / pos.w, 
-						pos.z / pos.w,
-						pos.w
-					};
-
-					float2 screenPos = {
-						(ndc.x * 0.5f + 0.5f) * target->width, 
-						(ndc.y * 0.5f + 0.5f) * target->height,
-					};
-
-					if(0.0f <= screenPos.x && screenPos.x < target->width)
-					if(0.0f <= screenPos.y && screenPos.y < target->height)
-					if(ndc.w > 0.0f){
-
-						int px = screenPos.x;
-						int py = screenPos.y;
-						int pixelID = px + py * target->width;
-
-						uint64_t color = 0x000000ff;
-						uint64_t idepth = *((uint32_t*)&pos.w);
-						uint64_t pixel = (idepth << 32) | color;
-
-
-						// atomicMin(&target->framebuffer[pixelID + 0], pixel);
-
-						for(int ox : {-2, -1, 0, 1, 2})
-						for(int oy : {-2, -1, 0, 1, 2})
-						{
-							
-							if(!((0 <= px + ox) && (px + ox < target->width))) continue;
-							if(!((0 <= py + oy) && (py + oy < target->height))) continue;
-
-							atomicMin(&target->framebuffer[pixelID + ox + oy * int(target->width)], pixel);
-						}
-						
-
-
-					}
-				}
-				
-
-
-			}
-
-
-		});
 
 	}
 
@@ -788,6 +857,142 @@ void kernel(
 
 		grid.sync();
 	}
+
+	// // ray tracing test
+	// float4 p_00;
+	// float4 p_10;
+	// float4 p_11;
+	// float4 p_01;
+	// // if(grid.thread_rank() == 0)
+	// {
+	// 	p_00 = uniforms.proj_inv * float4{-1.0f, -1.0f, -1.0f, 1.0f};
+	// 	p_10 = uniforms.proj_inv * float4{ 1.0f, -1.0f, -1.0f, 1.0f};
+	// 	p_11 = uniforms.proj_inv * float4{ 1.0f,  1.0f, -1.0f, 1.0f};
+	// 	p_01 = uniforms.proj_inv * float4{-1.0f,  1.0f, -1.0f, 1.0f};
+
+	// 	p_00 = p_00 / p_00.w;
+	// 	p_10 = p_10 / p_10.w;
+	// 	p_11 = p_11 / p_11.w;
+	// 	p_01 = p_01 / p_01.w;
+
+	// 	// printf("====== \n");
+	// 	// printf("p_00: %f, %f, %f, %f \n", p_00.x, p_00.y, p_00.z, p_00.w);
+	// 	// printf("p_10: %f, %f, %f, %f \n", p_10.x, p_10.y, p_10.z, p_10.w);
+	// 	// printf("p_11: %f, %f, %f, %f \n", p_11.x, p_11.y, p_11.z, p_11.w);
+	// 	// printf("p_01: %f, %f, %f, %f \n", p_01.x, p_01.y, p_01.z, p_01.w);
+	// }
+
+	// grid.sync();
+
+	// { // draw the triangle mesh that was passed to this kernel
+	// 	Triangles* triangles = allocator->alloc<Triangles*>(sizeof(Triangles));
+	// 	triangles->numTriangles = numTriangles;
+
+	// 	triangles->positions = positions;
+	// 	triangles->uvs = uvs;
+	// 	triangles->colors = colors;
+
+	// 	Texture texture;
+	// 	texture.width  = 1024;
+	// 	texture.height = 1024;
+	// 	texture.data   = textureData;
+
+	// 	RasterizationSettings settings;
+	// 	settings.texture = &texture;
+	// 	settings.colorMode = uniforms.colorMode;
+	// 	settings.world = uniforms.world;
+
+	// 	// rasterizeTriangles(triangles, framebuffer, settings);
+	// 	// for(float4 pos : {p_11})
+	// 	for(float4 pos : {p_00, p_10, p_01, p_11})
+	// 	{
+	// 		float s = 0.01f;
+	// 		settings.world = uniforms.view_inv * mat4::translate(pos.x, pos.y, pos.z) * mat4::scale(s, s, s);
+
+	// 		settings.view = uniforms.view;
+	// 		settings.proj = uniforms.proj;
+	// 		settings.width = uniforms.width;
+	// 		settings.height = uniforms.height;
+
+	// 		rasterizeTriangles(triangles, framebuffer, settings);
+			
+	// 		grid.sync();
+	// 	}
+	// }
+
+	// grid.sync();
+
+	// // TRY RAY TRACING ?!?
+	// // if(false)
+	// processRange(0, uniforms.width * uniforms.height, [&](int pixelIndex){
+
+	// 	int x = pixelIndex % int(uniforms.width);
+	// 	int y = pixelIndex / int(uniforms.width);
+
+	// 	float u = float(x) / uniforms.width;
+	// 	float v = float(y) / uniforms.height;
+
+	// 	uint32_t color;
+	// 	uint8_t* rgba = (uint8_t*)&color;
+	// 	rgba[0] = 255.0f * u;
+	// 	rgba[1] = 255.0f * v;
+	// 	rgba[2] = 0;
+	// 	rgba[3] = 0;
+
+	// 	float3 origin = make_float3(uniforms.view_inv * float4{0.0f, 0.0f, 0.0f, 1.0f});
+		
+	// 	float dx = (1.0f - u) * p_00.x + u * p_10.x;
+	// 	float dy = (1.0f - u) * p_00.x + u * p_01.x;
+	// 	float dz = p_00.z;
+	// 	float3 dir_obj = {dx, dy, dz};
+	// 	float3 dir = make_float3(uniforms.view_inv * float4{dx, dy, dz, 1.0f});
+	// 	dir = dir - origin;
+
+	// 	// dir = dir * -1.0f;
+	// 	dir = normalize(dir);
+
+	// 	// ray sphere, from https://www.scratchapixel.com/lessons/3d-basic-rendering/minimal-ray-tracer-rendering-simple-shapes/ray-sphere-intersection.html
+	// 	bool isIntersecting = false;
+		
+	// 	float radius = 1.0f;
+	// 	float radius2 = radius * radius;
+	// 	float3 spherePos = {0.0f, 0.0f, 0.0f};
+	// 	float3 L = spherePos - origin;
+
+	// 	float tc = dot(L, dir);
+
+	// 	if(tc < 0.0f) return;
+
+	// 	float d2 = tc * tc - dot(L, L);
+
+	// 	if(d2 > radius2) return;
+
+	// 	float t1c = sqrt(radius2 - d2);
+		
+	// 	float t1 = tc - t1c;
+	// 	float t2 = tc + t1c;
+
+	// 	rgba[0] = 200 * t1c;
+	// 	rgba[1] = 0;
+	// 	rgba[2] = 0;
+	// 	rgba[3] = 0;
+
+	// 	if(isIntersecting){
+	// 		rgba[0] = 0x0000ff00;
+	// 	}else{
+	// 		// rgba[0] = 0x00ff0000;
+	// 	}
+
+	// 	uint64_t depth = 0;
+
+	// 	uint64_t encoded = (depth << 32) | color;
+
+	// 	// if(isIntersecting)
+	// 	// framebuffer[pixelIndex] = encoded;
+
+	// });
+
+	grid.sync();
 
 	// transfer framebuffer to opengl texture
 	if(uniforms.vrEnabled){
