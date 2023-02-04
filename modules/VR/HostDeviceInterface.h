@@ -243,6 +243,7 @@ int COLORMODE_UV               = 1;
 int COLORMODE_TRIANGLE_ID      = 2;
 int COLORMODE_TIME             = 3;
 int COLORMODE_TIME_NORMALIZED  = 4;
+int COLORMODE_VERTEXCOLOR      = 5;
 
 int SAMPLEMODE_NEAREST     = 0;
 int SAMPLEMODE_LINEAR      = 1;
