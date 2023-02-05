@@ -8,6 +8,7 @@ namespace fs = std::filesystem;
 
 auto _controls = make_shared<OrbitControls>();
 
+
 static void APIENTRY debugCallback(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const GLchar* message, const void* userParam) {
 
 	if (
@@ -205,6 +206,8 @@ shared_ptr<Framebuffer> GLRenderer::createFramebuffer(int width, int height) {
 	if (status != GL_FRAMEBUFFER_COMPLETE) {
 		cout << "framebuffer incomplete" << endl;
 	}
+
+	framebuffer->setSize(width, height);
 
 	return framebuffer;
 }

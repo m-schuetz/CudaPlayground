@@ -1,0 +1,83 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="..\libs\imgui\imgui.cpp">
+      <Filter>imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\libs\imgui\imgui_draw.cpp">
+      <Filter>imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\libs\imgui\backends\imgui_impl_glfw.cpp">
+      <Filter>imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\libs\imgui\backends\imgui_impl_opengl3.cpp">
+      <Filter>imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\libs\imgui\imgui_tables.cpp">
+      <Filter>imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\libs\imgui\imgui_widgets.cpp">
+      <Filter>imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\libs\implot\implot.cpp">
+      <Filter>imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\libs\implot\implot_items.cpp">
+      <Filter>imgui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\libs\glew\glew.c">
+      <Filter>stuff</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\GLRenderer.cpp">
+      <Filter>stuff</Filter>
+    </ClCompile>
+    <ClCompile Include="..\include\unsuck_platform_specific.cpp">
+      <Filter>stuff</Filter>
+    </ClCompile>
+    <ClCompile Include="..\modules\VR\OpenVRHelper.cpp" />
+    <ClCompile Include="..\modules\VR\main_vr.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\libs\imgui\imgui.h">
+      <Filter>imgui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\libs\imgui\backends\imgui_impl_glfw.h">
+      <Filter>imgui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\libs\imgui\backends\imgui_impl_opengl3.h">
+      <Filter>imgui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\libs\implot\implot.h">
+      <Filter>imgui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\libs\implot\implot_internal.h">
+      <Filter>imgui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\include\unsuck.hpp">
+      <Filter>stuff</Filter>
+    </ClInclude>
+    <ClInclude Include="..\modules\VR\OpenVRHelper.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="cuda">
+      <UniqueIdentifier>{8f980257-14d9-486c-923f-14e7da9fdee2}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="imgui">
+      <UniqueIdentifier>{361e2fc3-3b4c-47b8-a73c-50a62adf8de7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="stuff">
+      <UniqueIdentifier>{3acaa933-97f0-4063-aeaa-c1e26ce3d35a}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\modules\VR\utils.h.cu">
+      <Filter>cuda</Filter>
+    </None>
+    <None Include="..\modules\VR\rasterize.cu">
+      <Filter>cuda</Filter>
+    </None>
+    <None Include="..\modules\VR\utils.cu">
+      <Filter>cuda</Filter>
+    </None>
+  </ItemGroup>
+</Project>
