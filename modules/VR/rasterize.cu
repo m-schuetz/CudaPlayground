@@ -6,11 +6,18 @@
 #include "helper_math.h"
 #include "HostDeviceInterface.h"
 
+constexpr bool EDL_ENABLED = false;
+
 constexpr uint32_t gridSize = 128;
 constexpr float fGridSize = gridSize;
 constexpr uint32_t numCells = gridSize * gridSize * gridSize;
 constexpr float3 gridMin = { -1.0f, -1.0f, 0.0f};
 constexpr float3 gridMax = { 1.0f, 1.0f, 2.0f};
+
+
+float cross(float2 a, float2 b){
+	return a.x * b.y - a.y * b.x;
+}
 
 constexpr int edgeTable[256] = {
 	0x0  , 0x109, 0x203, 0x30a, 0x406, 0x50f, 0x605, 0x70c,
@@ -480,6 +487,15 @@ void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, Rasterizati
 	}
 	grid.sync();
 
+	float3 lightPos = {10.0f, 10.0f, 10.0f};
+	// float3 L = {10.0f, 10.0f, 10.0f};
+
+	if(uniforms.vrEnabled){
+		float4 leftPos = uniforms.vr_left_view_inv * float4{0.0, 0.0f, 0.0f, 1.0f};
+
+		lightPos = {leftPos.x, leftPos.y, leftPos.z};
+	}
+
 	{
 		__shared__ int sh_triangleIndex;
 
@@ -533,15 +549,25 @@ void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, Rasterizati
 			// cull a triangle if one of its vertices is closer than depth 0
 			if(p0.w < 0.0 || p1.w < 0.0 || p2.w < 0.0) continue;
 
-			float2 v01 = {p1.x - p0.x, p1.y - p0.y};
-			float2 v02 = {p2.x - p0.x, p2.y - p0.y};
 
-			auto cross = [](float2 a, float2 b){ return a.x * b.y - a.y * b.x; };
+			float3 v01 = {v1.x - v0.x, v1.y - v0.y, v1.z - v0.z};
+			float3 v02 = {v2.x - v0.x, v2.y - v0.y, v2.z - v0.z};
+			float3 N = normalize(cross(v02, v01));
 
-			// {// backface culling
-			// 	float w = cross(v01, v02);
-			// 	if(w < 0.0) continue;
+			// if(sh_triangleIndex == 0 && block.thread_rank() == 0){
+			// 	printf("%f, %f, %f \n", N.x, N.y, N.z);
 			// }
+
+			float2 p01 = {p1.x - p0.x, p1.y - p0.y};
+			float2 p02 = {p2.x - p0.x, p2.y - p0.y};
+
+			// auto cross = [](float2 a, float2 b){ return a.x * b.y - a.y * b.x; };
+			// auto cross = [](float3 a, float3 b){ return a.y * b.z - a.y * b.x; };
+
+			{// backface culling
+				float w = cross(p01, p02);
+				if(w < 0.0) continue;
+			}
 
 			// compute screen-space bounding rectangle
 			float min_x = min(min(p0.x, p1.x), p2.x);
@@ -577,8 +603,8 @@ void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, Rasterizati
 				float2 sample = {pFrag.x - p0.x, pFrag.y - p0.y};
 
 				// v: vertex[0], s: vertex[1], t: vertex[2]
-				float s = cross(sample, v02) / cross(v01, v02);
-				float t = cross(v01, sample) / cross(v01, v02);
+				float s = cross(sample, p02) / cross(p01, p02);
+				float t = cross(p01, sample) / cross(p01, p02);
 				float v = 1.0 - (s + t);
 
 				int2 pixelCoords = make_int2(pFrag.x, pFrag.y);
@@ -647,6 +673,21 @@ void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, Rasterizati
 						// WHATEVER
 						color = sh_triangleIndex * 123456;
 					}
+
+					// float3 L = {10.0f, 10.0f, 10.0f};
+					float3 L = normalize(v0 - lightPos);
+
+					float lambertian = max(dot(N, L), 0.0);
+
+					// rgb[0] = 255.0f *  N.x;
+					// rgb[1] = 255.0f *  N.y;
+					// rgb[2] = 255.0f *  N.z;
+
+					float3 diffuse = {0.8f, 0.8f, 0.8f};
+					float3 ambient = {0.2f, 0.2f, 0.2f};
+					rgb[0] = rgb[0] * (lambertian * diffuse.x + ambient.x);
+					rgb[1] = rgb[1] * (lambertian * diffuse.y + ambient.y);
+					rgb[2] = rgb[2] * (lambertian * diffuse.z + ambient.z);
 
 					float depth = v * p0.w + s * p1.w + t * p2.w;
 					uint64_t udepth = *((uint32_t*)&depth);
@@ -815,29 +856,8 @@ Triangles* marchingCubes(int gridSize, uint32_t* voxelGrid){
 	triangles->numTriangles = 0;
 	float3 boxSize = gridMax - gridMin;
 
-	// float brushRadius = 2.0;
-	// float3 controllerPos_world;
-	// float3 controllerPos_voxelgrid;
-	// if(uniforms.vrEnabled){
-	// 	mat4 rot = mat4::rotate(0.5f * PI, {1.0f, 0.0f, 0.0f}).transpose();
-	// 	float4 pos = rot * uniforms.vr_right_controller_pose.transpose() * float4{0.0f, 0.0f, 0.0f, 1.0f};
-	// 	float3 boxSize = gridMax - gridMin;
-
-	// 	float fx = gridSize * (pos.x - gridMin.x) / boxSize.x;
-	// 	float fy = gridSize * (pos.y - gridMin.y) / boxSize.y;
-	// 	float fz = gridSize * (pos.z - gridMin.z) / boxSize.z;
-
-	// 	int ix = fx;
-	// 	int iy = fy;
-	// 	int iz = fz;
-
-	// 	controllerPos_world = {pos.x, pos.y, pos.z};
-	// 	controllerPos_voxelgrid = {fx, fy, fz};
-	// }
-
 	grid.sync();
 
-	// int gm1 = gridSize - 1;
 	processRange(0, gridSize * gridSize * gridSize, [&](int voxelIndex){
 
 		int x = voxelIndex % gridSize;
@@ -944,13 +964,13 @@ Triangles* marchingCubes(int gridSize, uint32_t* voxelGrid){
 			
 			if(index >= maxTriangles) break;
 
-			triangles->positions[3 * index + 0] = vertlist[triTable[cubeindex][i + 0]];
+			triangles->positions[3 * index + 2] = vertlist[triTable[cubeindex][i + 0]];
 			triangles->positions[3 * index + 1] = vertlist[triTable[cubeindex][i + 1]];
-			triangles->positions[3 * index + 2] = vertlist[triTable[cubeindex][i + 2]];
+			triangles->positions[3 * index + 0] = vertlist[triTable[cubeindex][i + 2]];
 
+			triangles->colors[3 * index + 2] = (2 * x) | (2 * y) << 8 | (2 * z) << 16;
+			triangles->colors[3 * index + 1] = (2 * x) | (2 * y) << 8 | (2 * z) << 16;
 			triangles->colors[3 * index + 0] = (2 * x) | (2 * y) << 8 | (2 * z) << 16;
-			triangles->colors[3 * index + 1] = 2 * y;
-			triangles->colors[3 * index + 2] = 2 * z;
 		}
 
 		// if(cubeindex != 0){
@@ -1009,6 +1029,10 @@ void kernel(
 	// 	// clear everything
 	// 	voxelGrid[voxelIndex] = 0;
 	// });
+
+	// if(grid.thread_rank() == 0){
+	// 	printf("%llu \n", uniforms.vr_right_controller_state.buttonPressedMask);
+	// }
 
 	// allocate framebuffer memory
 	int framebufferSize = int(uniforms.width) * int(uniforms.height) * sizeof(uint64_t);
@@ -1292,60 +1316,100 @@ void kernel(
 	// VOXEL PAINTING / CONTROLLER INPUT
 	if(grid.thread_rank() == 0){
 
-		float brushRadius = 2.0;
-		int iBrushRadius = ceil(brushRadius);
-		float brushRadius2 = brushRadius * brushRadius;
+		// see openvr.h: EVRButtonId and ButtonMaskFromId
+		uint64_t triggerMask = 1ull << 33ull;
+		bool leftTriggerButtonDown = (uniforms.vr_left_controller_state.buttonPressedMask & triggerMask) != 0;
+		bool rightTriggerButtonDown = (uniforms.vr_right_controller_state.buttonPressedMask & triggerMask) != 0;
+		bool isTriggerDown = leftTriggerButtonDown || rightTriggerButtonDown;
+
+		// printf("%llu \n", leftTriggerButtonDown);
 		
-		mat4 rot = mat4::rotate(0.5f * PI, {1.0f, 0.0f, 0.0f}).transpose();
-		float4 pos = rot * uniforms.vr_right_controller_pose.transpose() * float4{0.0f, 0.0f, 0.0f, 1.0f};
-		float3 boxSize = gridMax - gridMin;
+		if(rightTriggerButtonDown){
+			float brushRadius = 2.0;
+			int iBrushRadius = ceil(brushRadius);
+			float brushRadius2 = brushRadius * brushRadius;
+			
+			mat4 rot = mat4::rotate(0.5f * PI, {1.0f, 0.0f, 0.0f}).transpose();
+			float4 pos = rot * uniforms.vr_right_controller_pose.transpose() * float4{0.0f, 0.0f, 0.0f, 1.0f};
+			float3 boxSize = gridMax - gridMin;
 
-		float fx = gridSize * (pos.x - gridMin.x) / boxSize.x;
-		float fy = gridSize * (pos.y - gridMin.y) / boxSize.y;
-		float fz = gridSize * (pos.z - gridMin.z) / boxSize.z;
+			float fx = gridSize * (pos.x - gridMin.x) / boxSize.x;
+			float fy = gridSize * (pos.y - gridMin.y) / boxSize.y;
+			float fz = gridSize * (pos.z - gridMin.z) / boxSize.z;
 
-		// int ix = fx;
-		// int iy = fy;
-		// int iz = fz;
-		// int voxelIndex = ix + iy * gridSize + iz * gridSize * gridSize;
+			for(int ox = -iBrushRadius; ox <= brushRadius; ox++)
+			for(int oy = -iBrushRadius; oy <= brushRadius; oy++)
+			for(int oz = -iBrushRadius; oz <= brushRadius; oz++)
+			{
 
-		// if(0 <= ix && ix < gridSize)
-		// if(0 <= iy && iy < gridSize)
-		// if(0 <= iz && iz < gridSize)
-		// {
-		// 	voxelGrid[voxelIndex] = 123;
-		// }
+				int ix = fx + float(ox);
+				int iy = fy + float(oy);
+				int iz = fz + float(oz);
 
-		for(int ox = -iBrushRadius; ox <= brushRadius; ox++)
-		for(int oy = -iBrushRadius; oy <= brushRadius; oy++)
-		for(int oz = -iBrushRadius; oz <= brushRadius; oz++)
-		{
+				if(ix < 0 || ix >= gridSize) continue;
+				if(iy < 0 || iy >= gridSize) continue;
+				if(iz < 0 || iz >= gridSize) continue;
 
-			int ix = fx + float(ox);
-			int iy = fy + float(oy);
-			int iz = fz + float(oz);
+				int voxelIndex = ix + iy * gridSize + iz * gridSize * gridSize;
 
-			if(ix < 0 || ix >= gridSize) continue;
-			if(iy < 0 || iy >= gridSize) continue;
-			if(iz < 0 || iz >= gridSize) continue;
+				float vcx = float(ix) + 0.5f;
+				float vcy = float(iy) + 0.5f;
+				float vcz = float(iz) + 0.5f;
+				float dx = vcx - fx;
+				float dy = vcy - fy;
+				float dz = vcz - fz;
+				float dd = dx * dx + dy * dy + dz * dz;
 
-			int voxelIndex = ix + iy * gridSize + iz * gridSize * gridSize;
+				// printf("%f \n", pos.x)-+;
 
-			float vcx = float(ix) + 0.5f;
-			float vcy = float(iy) + 0.5f;
-			float vcz = float(iz) + 0.5f;
-			float dx = vcx - fx;
-			float dy = vcy - fy;
-			float dz = vcz - fz;
-			float dd = dx * dx + dy * dy + dz * dz;
-
-			// printf("%f \n", pos.x)-+;
-
-			if(dd < brushRadius2){
-				voxelGrid[voxelIndex] = 123;
+				if(dd < brushRadius2){
+					voxelGrid[voxelIndex] = 123;
+				}
 			}
+		}
 
+		if(leftTriggerButtonDown){
+			float brushRadius = 3.0;
+			int iBrushRadius = ceil(brushRadius);
+			float brushRadius2 = brushRadius * brushRadius;
+			
+			mat4 rot = mat4::rotate(0.5f * PI, {1.0f, 0.0f, 0.0f}).transpose();
+			float4 pos = rot * uniforms.vr_left_controller_pose.transpose() * float4{0.0f, 0.0f, 0.0f, 1.0f};
+			float3 boxSize = gridMax - gridMin;
 
+			float fx = gridSize * (pos.x - gridMin.x) / boxSize.x;
+			float fy = gridSize * (pos.y - gridMin.y) / boxSize.y;
+			float fz = gridSize * (pos.z - gridMin.z) / boxSize.z;
+
+			for(int ox = -iBrushRadius; ox <= brushRadius; ox++)
+			for(int oy = -iBrushRadius; oy <= brushRadius; oy++)
+			for(int oz = -iBrushRadius; oz <= brushRadius; oz++)
+			{
+
+				int ix = fx + float(ox);
+				int iy = fy + float(oy);
+				int iz = fz + float(oz);
+
+				if(ix < 0 || ix >= gridSize) continue;
+				if(iy < 0 || iy >= gridSize) continue;
+				if(iz < 0 || iz >= gridSize) continue;
+
+				int voxelIndex = ix + iy * gridSize + iz * gridSize * gridSize;
+
+				float vcx = float(ix) + 0.5f;
+				float vcy = float(iy) + 0.5f;
+				float vcz = float(iz) + 0.5f;
+				float dx = vcx - fx;
+				float dy = vcy - fy;
+				float dz = vcz - fz;
+				float dd = dx * dx + dy * dy + dz * dz;
+
+				// printf("%f \n", pos.x)-+;
+
+				if(dd < brushRadius2){
+					voxelGrid[voxelIndex] = 0;
+				}
+			}
 		}
 	}
 
@@ -1561,6 +1625,44 @@ void kernel(
 
 			uint64_t encoded = fb_vr_left[pixelIndex];
 			uint32_t color = encoded & 0xffffffffull;
+			uint8_t* rgba = (uint8_t*)&color;
+			uint32_t idepth = (encoded >> 32);
+			float depth = *((float*)&idepth);
+
+			if(EDL_ENABLED){
+				float edlRadius = 2.0f;
+				float edlStrength = 0.4f;
+				float2 edlSamples[4] = {
+					{-1.0f,  0.0f},
+					{ 1.0f,  0.0f},
+					{ 0.0f,  1.0f},
+					{ 0.0f, -1.0f}
+				};
+
+				float sum = 0.0f;
+				for(int i = 0; i < 4; i++){
+					float2 samplePos = {
+						x + edlSamples[i].x,
+						y + edlSamples[i].y
+					};
+
+					int sx = clamp(samplePos.x, 0.0f, uniforms.vr_left_width - 1.0f);
+					int sy = clamp(samplePos.y, 0.0f, uniforms.vr_left_height - 1.0f);
+					int samplePixelIndex = sx + sy * uniforms.vr_left_width;
+
+					uint64_t sampleEncoded = fb_vr_left[samplePixelIndex];
+					uint32_t iSampledepth = (sampleEncoded >> 32);
+					float sampleDepth = *((float*)&iSampledepth);
+
+					sum += max(0.0, depth - sampleDepth);
+				}
+
+				float shade = exp(-sum * 300.0 * edlStrength);
+
+				rgba[0] = float(rgba[0]) * shade;
+				rgba[1] = float(rgba[1]) * shade;
+				rgba[2] = float(rgba[2]) * shade;
+			}
 
 			surf2Dwrite(color, gl_colorbuffer_vr_left, x * 4, y);
 		});
@@ -1572,6 +1674,44 @@ void kernel(
 
 			uint64_t encoded = fb_vr_right[pixelIndex];
 			uint32_t color = encoded & 0xffffffffull;
+			uint8_t* rgba = (uint8_t*)&color;
+			uint32_t idepth = (encoded >> 32);
+			float depth = *((float*)&idepth);
+
+			if(EDL_ENABLED){
+				float edlRadius = 2.0f;
+				float edlStrength = 0.4f;
+				float2 edlSamples[4] = {
+					{-1.0f,  0.0f},
+					{ 1.0f,  0.0f},
+					{ 0.0f,  1.0f},
+					{ 0.0f, -1.0f}
+				};
+
+				float sum = 0.0f;
+				for(int i = 0; i < 4; i++){
+					float2 samplePos = {
+						x + edlSamples[i].x,
+						y + edlSamples[i].y
+					};
+
+					int sx = clamp(samplePos.x, 0.0f, uniforms.vr_right_width - 1.0f);
+					int sy = clamp(samplePos.y, 0.0f, uniforms.vr_right_height - 1.0f);
+					int samplePixelIndex = sx + sy * uniforms.vr_right_width;
+
+					uint64_t sampleEncoded = fb_vr_right[samplePixelIndex];
+					uint32_t iSampledepth = (sampleEncoded >> 32);
+					float sampleDepth = *((float*)&iSampledepth);
+
+					sum += max(0.0, depth - sampleDepth);
+				}
+
+				float shade = exp(-sum * 300.0 * edlStrength);
+
+				rgba[0] = float(rgba[0]) * shade;
+				rgba[1] = float(rgba[1]) * shade;
+				rgba[2] = float(rgba[2]) * shade;
+			}
 
 			surf2Dwrite(color, gl_colorbuffer_vr_right, x * 4, y);
 		});

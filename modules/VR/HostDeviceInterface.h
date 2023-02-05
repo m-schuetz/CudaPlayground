@@ -248,6 +248,13 @@ int COLORMODE_VERTEXCOLOR      = 5;
 int SAMPLEMODE_NEAREST     = 0;
 int SAMPLEMODE_LINEAR      = 1;
 
+
+struct ControllerState{
+	uint32_t packetNum;
+	uint64_t buttonPressedMask;
+	uint64_t buttonTouchedMask;
+};
+
 struct Uniforms{
 	float width;
 	float height;
@@ -273,6 +280,8 @@ struct Uniforms{
 	mat4 vr_left_transform;
 	bool vr_left_controller_active;
 	mat4 vr_left_controller_pose;
+	ControllerState vr_left_controller_state;
+	
 
 	float vr_right_width;
 	float vr_right_height;
@@ -284,6 +293,7 @@ struct Uniforms{
 	mat4 vr_right_transform;
 	bool vr_right_controller_active;
 	mat4 vr_right_controller_pose;
+	ControllerState vr_right_controller_state;
 
 
 };

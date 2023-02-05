@@ -151,28 +151,65 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 		glm::inverse(view);
 	}
 
-	{ // world view proj VR LEFT
-		glm::mat4 rotX = glm::rotate(glm::mat4(), 3.1415f * 0.5f, glm::vec3(1.0, 0.0, 0.0));
-		glm::mat4 world = rotX;
-		glm::mat4 view = viewLeft.view;
-		glm::mat4 proj = viewLeft.proj;
-		glm::mat4 worldViewProj = proj * view * world;
-		world = glm::transpose(world);
-		view = glm::transpose(view);
-		proj = glm::transpose(proj);
-		worldViewProj = glm::transpose(worldViewProj);
-		memcpy(&uniforms.vr_left_world, &world, sizeof(world));
-		memcpy(&uniforms.vr_left_view, &view, sizeof(view));
-		memcpy(&uniforms.vr_left_proj, &proj, sizeof(proj));
-		memcpy(&uniforms.vr_left_transform, &worldViewProj, sizeof(worldViewProj));
+	if(ovr->isActive()){
+		{ // VR LEFT
+			glm::mat4 rotX = glm::rotate(glm::mat4(), 3.1415f * 0.5f, glm::vec3(1.0, 0.0, 0.0));
+			glm::mat4 world = rotX;
+			glm::mat4 view = viewLeft.view;
+			glm::mat4 proj = viewLeft.proj;
+			glm::mat4 worldViewProj = proj * view * world;
+			glm::mat4 view_inv = glm::inverse(view);
+			glm::mat4 proj_inv = glm::inverse(proj);
 
-		if(ovr->isActive()){
+			world = glm::transpose(world);
+			view = glm::transpose(view);
+			proj = glm::transpose(proj);
+			worldViewProj = glm::transpose(worldViewProj);
+			view_inv = glm::transpose(view_inv);
+			proj_inv = glm::transpose(proj_inv);
+
+			memcpy(&uniforms.vr_left_world, &world, sizeof(world));
+			memcpy(&uniforms.vr_left_view, &view, sizeof(view));
+			memcpy(&uniforms.vr_left_proj, &proj, sizeof(proj));
+			memcpy(&uniforms.vr_left_transform, &worldViewProj, sizeof(worldViewProj));
+			memcpy(&uniforms.vr_left_view_inv, &view_inv, sizeof(view_inv));
+			memcpy(&uniforms.vr_left_proj_inv, &proj_inv, sizeof(proj_inv));
+			
 			Pose poseLeft = ovr->getLeftControllerPose();
 			uniforms.vr_left_controller_active = poseLeft.valid;
 			if(poseLeft.valid){
 				glm::mat4 transform = poseLeft.transform;
 				memcpy(&uniforms.vr_left_controller_pose, &transform, sizeof(transform));
 			}
+			
+			auto state = ovr->getLeftControllerState();
+			uniforms.vr_left_controller_state.packetNum = state.unPacketNum;
+			uniforms.vr_left_controller_state.buttonPressedMask = state.ulButtonPressed;
+			uniforms.vr_left_controller_state.buttonTouchedMask = state.ulButtonTouched;
+		}
+
+		{ // VR RIGHT
+			glm::mat4 rotX = glm::rotate(glm::mat4(), 3.1415f * 0.5f, glm::vec3(1.0, 0.0, 0.0));
+			glm::mat4 world = rotX;
+			glm::mat4 view = viewRight.view;
+			glm::mat4 proj = viewRight.proj;
+			glm::mat4 worldViewProj = proj * view * world;
+			glm::mat4 view_inv = glm::inverse(view);
+			glm::mat4 proj_inv = glm::inverse(proj);
+
+			world = glm::transpose(world);
+			view = glm::transpose(view);
+			proj = glm::transpose(proj);
+			worldViewProj = glm::transpose(worldViewProj);
+			view_inv = glm::transpose(view_inv);
+			proj_inv = glm::transpose(proj_inv);
+
+			memcpy(&uniforms.vr_right_world, &world, sizeof(world));
+			memcpy(&uniforms.vr_right_view, &view, sizeof(view));
+			memcpy(&uniforms.vr_right_proj, &proj, sizeof(proj));
+			memcpy(&uniforms.vr_right_transform, &worldViewProj, sizeof(worldViewProj));
+			memcpy(&uniforms.vr_right_view_inv, &view_inv, sizeof(view_inv));
+			memcpy(&uniforms.vr_right_proj_inv, &proj_inv, sizeof(proj_inv));
 
 			Pose poseRight = ovr->getRightControllerPose();
 			uniforms.vr_right_controller_active = poseRight.valid;
@@ -180,23 +217,12 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 				glm::mat4 transform = poseRight.transform;
 				memcpy(&uniforms.vr_right_controller_pose, &transform, sizeof(transform));
 			}
-		}
-	}
 
-	{ // world view proj VR RIGHT
-		glm::mat4 rotX = glm::rotate(glm::mat4(), 3.1415f * 0.5f, glm::vec3(1.0, 0.0, 0.0));
-		glm::mat4 world = rotX;
-		glm::mat4 view = viewRight.view;
-		glm::mat4 proj = viewRight.proj;
-		glm::mat4 worldViewProj = proj * view * world;
-		world = glm::transpose(world);
-		view = glm::transpose(view);
-		proj = glm::transpose(proj);
-		worldViewProj = glm::transpose(worldViewProj);
-		memcpy(&uniforms.vr_right_world, &world, sizeof(world));
-		memcpy(&uniforms.vr_right_view, &view, sizeof(view));
-		memcpy(&uniforms.vr_right_proj, &proj, sizeof(proj));
-		memcpy(&uniforms.vr_right_transform, &worldViewProj, sizeof(worldViewProj));
+			auto state = ovr->getRightControllerState();
+			uniforms.vr_right_controller_state.packetNum = state.unPacketNum;
+			uniforms.vr_right_controller_state.buttonPressedMask = state.ulButtonPressed;
+			uniforms.vr_right_controller_state.buttonTouchedMask = state.ulButtonTouched;
+		}
 	}
 
 
