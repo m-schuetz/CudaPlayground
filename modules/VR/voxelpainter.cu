@@ -1,13 +1,12 @@
 #include <cooperative_groups.h>
 #include <curand_kernel.h>
 
-#include "utils.h.cu"
+#include "utils.h.cu"../modules/VR/voxelpainter.cu
 #include "builtin_types.h"
 #include "helper_math.h"
 #include "HostDeviceInterface.h"
 
 constexpr bool EDL_ENABLED = false;
-
 constexpr uint32_t gridSize = 128;
 constexpr float fGridSize = gridSize;
 constexpr uint32_t numCells = gridSize * gridSize * gridSize;
@@ -19,42 +18,32 @@ float cross(float2 a, float2 b){
 	return a.x * b.y - a.y * b.x;
 }
 
+// table from http://paulbourke.net/geometry/polygonise/marchingsource.cpp
+// (publich domain)
 constexpr int edgeTable[256] = {
-	0x0  , 0x109, 0x203, 0x30a, 0x406, 0x50f, 0x605, 0x70c,
-	0x80c, 0x905, 0xa0f, 0xb06, 0xc0a, 0xd03, 0xe09, 0xf00,
-	0x190, 0x99 , 0x393, 0x29a, 0x596, 0x49f, 0x795, 0x69c,
-	0x99c, 0x895, 0xb9f, 0xa96, 0xd9a, 0xc93, 0xf99, 0xe90,
-	0x230, 0x339, 0x33 , 0x13a, 0x636, 0x73f, 0x435, 0x53c,
-	0xa3c, 0xb35, 0x83f, 0x936, 0xe3a, 0xf33, 0xc39, 0xd30,
-	0x3a0, 0x2a9, 0x1a3, 0xaa , 0x7a6, 0x6af, 0x5a5, 0x4ac,
-	0xbac, 0xaa5, 0x9af, 0x8a6, 0xfaa, 0xea3, 0xda9, 0xca0,
-	0x460, 0x569, 0x663, 0x76a, 0x66 , 0x16f, 0x265, 0x36c,
-	0xc6c, 0xd65, 0xe6f, 0xf66, 0x86a, 0x963, 0xa69, 0xb60,
-	0x5f0, 0x4f9, 0x7f3, 0x6fa, 0x1f6, 0xff , 0x3f5, 0x2fc,
-	0xdfc, 0xcf5, 0xfff, 0xef6, 0x9fa, 0x8f3, 0xbf9, 0xaf0,
-	0x650, 0x759, 0x453, 0x55a, 0x256, 0x35f, 0x55 , 0x15c,
-	0xe5c, 0xf55, 0xc5f, 0xd56, 0xa5a, 0xb53, 0x859, 0x950,
-	0x7c0, 0x6c9, 0x5c3, 0x4ca, 0x3c6, 0x2cf, 0x1c5, 0xcc ,
-	0xfcc, 0xec5, 0xdcf, 0xcc6, 0xbca, 0xac3, 0x9c9, 0x8c0,
-	0x8c0, 0x9c9, 0xac3, 0xbca, 0xcc6, 0xdcf, 0xec5, 0xfcc,
-	0xcc , 0x1c5, 0x2cf, 0x3c6, 0x4ca, 0x5c3, 0x6c9, 0x7c0,
-	0x950, 0x859, 0xb53, 0xa5a, 0xd56, 0xc5f, 0xf55, 0xe5c,
-	0x15c, 0x55 , 0x35f, 0x256, 0x55a, 0x453, 0x759, 0x650,
-	0xaf0, 0xbf9, 0x8f3, 0x9fa, 0xef6, 0xfff, 0xcf5, 0xdfc,
-	0x2fc, 0x3f5, 0xff , 0x1f6, 0x6fa, 0x7f3, 0x4f9, 0x5f0,
-	0xb60, 0xa69, 0x963, 0x86a, 0xf66, 0xe6f, 0xd65, 0xc6c,
-	0x36c, 0x265, 0x16f, 0x66 , 0x76a, 0x663, 0x569, 0x460,
-	0xca0, 0xda9, 0xea3, 0xfaa, 0x8a6, 0x9af, 0xaa5, 0xbac,
-	0x4ac, 0x5a5, 0x6af, 0x7a6, 0xaa , 0x1a3, 0x2a9, 0x3a0,
-	0xd30, 0xc39, 0xf33, 0xe3a, 0x936, 0x83f, 0xb35, 0xa3c,
-	0x53c, 0x435, 0x73f, 0x636, 0x13a, 0x33 , 0x339, 0x230,
-	0xe90, 0xf99, 0xc93, 0xd9a, 0xa96, 0xb9f, 0x895, 0x99c,
-	0x69c, 0x795, 0x49f, 0x596, 0x29a, 0x393, 0x99 , 0x190,
-	0xf00, 0xe09, 0xd03, 0xc0a, 0xb06, 0xa0f, 0x905, 0x80c,
-	0x70c, 0x605, 0x50f, 0x406, 0x30a, 0x203, 0x109, 0x0   
+	0x000, 0x109, 0x203, 0x30a, 0x406, 0x50f, 0x605, 0x70c, 0x80c, 0x905, 0xa0f, 0xb06, 0xc0a, 0xd03, 0xe09, 0xf00, 
+	0x190, 0x099, 0x393, 0x29a, 0x596, 0x49f, 0x795, 0x69c, 0x99c, 0x895, 0xb9f, 0xa96, 0xd9a, 0xc93, 0xf99, 0xe90, 
+	0x230, 0x339, 0x033, 0x13a, 0x636, 0x73f, 0x435, 0x53c, 0xa3c, 0xb35, 0x83f, 0x936, 0xe3a, 0xf33, 0xc39, 0xd30, 
+	0x3a0, 0x2a9, 0x1a3, 0x0aa, 0x7a6, 0x6af, 0x5a5, 0x4ac, 0xbac, 0xaa5, 0x9af, 0x8a6, 0xfaa, 0xea3, 0xda9, 0xca0, 
+	0x460, 0x569, 0x663, 0x76a, 0x066, 0x16f, 0x265, 0x36c, 0xc6c, 0xd65, 0xe6f, 0xf66, 0x86a, 0x963, 0xa69, 0xb60, 
+	0x5f0, 0x4f9, 0x7f3, 0x6fa, 0x1f6, 0x0ff, 0x3f5, 0x2fc, 0xdfc, 0xcf5, 0xfff, 0xef6, 0x9fa, 0x8f3, 0xbf9, 0xaf0, 
+	0x650, 0x759, 0x453, 0x55a, 0x256, 0x35f, 0x055, 0x15c, 0xe5c, 0xf55, 0xc5f, 0xd56, 0xa5a, 0xb53, 0x859, 0x950, 
+	0x7c0, 0x6c9, 0x5c3, 0x4ca, 0x3c6, 0x2cf, 0x1c5, 0x0cc, 0xfcc, 0xec5, 0xdcf, 0xcc6, 0xbca, 0xac3, 0x9c9, 0x8c0, 
+	0x8c0, 0x9c9, 0xac3, 0xbca, 0xcc6, 0xdcf, 0xec5, 0xfcc, 0x0cc, 0x1c5, 0x2cf, 0x3c6, 0x4ca, 0x5c3, 0x6c9, 0x7c0, 
+	0x950, 0x859, 0xb53, 0xa5a, 0xd56, 0xc5f, 0xf55, 0xe5c, 0x15c, 0x055, 0x35f, 0x256, 0x55a, 0x453, 0x759, 0x650, 
+	0xaf0, 0xbf9, 0x8f3, 0x9fa, 0xef6, 0xfff, 0xcf5, 0xdfc, 0x2fc, 0x3f5, 0x0ff, 0x1f6, 0x6fa, 0x7f3, 0x4f9, 0x5f0, 
+	0xb60, 0xa69, 0x963, 0x86a, 0xf66, 0xe6f, 0xd65, 0xc6c, 0x36c, 0x265, 0x16f, 0x066, 0x76a, 0x663, 0x569, 0x460, 
+	0xca0, 0xda9, 0xea3, 0xfaa, 0x8a6, 0x9af, 0xaa5, 0xbac, 0x4ac, 0x5a5, 0x6af, 0x7a6, 0x0aa, 0x1a3, 0x2a9, 0x3a0, 
+	0xd30, 0xc39, 0xf33, 0xe3a, 0x936, 0x83f, 0xb35, 0xa3c, 0x53c, 0x435, 0x73f, 0x636, 0x13a, 0x033, 0x339, 0x230, 
+	0xe90, 0xf99, 0xc93, 0xd9a, 0xa96, 0xb9f, 0x895, 0x99c, 0x69c, 0x795, 0x49f, 0x596, 0x29a, 0x393, 0x099, 0x190, 
+	0xf00, 0xe09, 0xd03, 0xc0a, 0xb06, 0xa0f, 0x905, 0x80c, 0x70c, 0x605, 0x50f, 0x406, 0x30a, 0x203, 0x109, 0x000
 };
+
+// table from http://paulbourke.net/geometry/polygonise/marchingsource.cpp
+// (publich domain)
 constexpr int triTable[256][16] =
-	{{-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+{
+	{-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
 	{0, 8, 3, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
 	{0, 1, 9, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
 	{1, 8, 3, 9, 8, 1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
@@ -812,43 +801,24 @@ void rasterizeVoxels(
 						atomicMin(&target->framebuffer[pixelID + ox + oy * int(target->width)], pixel);
 					}
 					
-   
 
 				}
 			}
 			
 		}
 	});
-
 }
+
 
 // see 
 // * http://paulbourke.net/geometry/polygonise/
-float3 VertexInterp(float isolevel, float3 p1, float3 p2, float valp1, float valp2)
-{
-	float mu;
-	float3 p;
-
-	if (abs(isolevel - valp1) < 0.00001) return(p1);
-	if (abs(isolevel - valp2) < 0.00001) return(p2);
-	if (abs(valp1 - valp2) < 0.00001) return(p1);
-
-	mu = (isolevel - valp1) / (valp2 - valp1);
-	p.x = p1.x + mu * (p2.x - p1.x);
-	p.y = p1.y + mu * (p2.y - p1.y);
-	p.z = p1.z + mu * (p2.z - p1.z);
-
-	return(p);
-}
-
-// see 
-// * http://paulbourke.net/geometry/polygonise/
+// * http://paulbourke.net/geometry/polygonise/marchingsource.cpp
 // * https://developer.nvidia.com/gpugems/gpugems3/part-i-geometry/chapter-1-generating-complex-procedural-terrains-using-gpu
 Triangles* marchingCubes(int gridSize, uint32_t* voxelGrid){
 
 	auto grid = cg::this_grid();
 
-	int maxTriangles = 100'000;
+	int maxTriangles = 200'000;
 	Triangles* triangles = allocator->alloc<Triangles*>(sizeof(Triangles));
 	triangles->positions = allocator->alloc<float3*>(3 * maxTriangles * sizeof(float3));
 	triangles->uvs = allocator->alloc<float2*>(2 * maxTriangles * sizeof(float2));
@@ -898,7 +868,6 @@ Triangles* marchingCubes(int gridSize, uint32_t* voxelGrid){
 			return value;
 		};
 
-
 		auto getXYZ = [&](int mcIndex){
 
 			int3 xyz_i = fromMCIndex(mcIndex);
@@ -912,70 +881,60 @@ Triangles* marchingCubes(int gridSize, uint32_t* voxelGrid){
 		};
 
 		uint32_t cubeindex = 0;
-		uint32_t isolevel = 0.5;
 		
-		if(getValue(0) > isolevel) cubeindex |=   1;
-		if(getValue(1) > isolevel) cubeindex |=   2;
-		if(getValue(2) > isolevel) cubeindex |=   4;
-		if(getValue(3) > isolevel) cubeindex |=   8;
-		if(getValue(4) > isolevel) cubeindex |=  16;
-		if(getValue(5) > isolevel) cubeindex |=  32;
-		if(getValue(6) > isolevel) cubeindex |=  64;
-		if(getValue(7) > isolevel) cubeindex |= 128;
+		if(getValue(0) > 0.0f) cubeindex |=   1;
+		if(getValue(1) > 0.0f) cubeindex |=   2;
+		if(getValue(2) > 0.0f) cubeindex |=   4;
+		if(getValue(3) > 0.0f) cubeindex |=   8;
+		if(getValue(4) > 0.0f) cubeindex |=  16;
+		if(getValue(5) > 0.0f) cubeindex |=  32;
+		if(getValue(6) > 0.0f) cubeindex |=  64;
+		if(getValue(7) > 0.0f) cubeindex |= 128;
 
-		// if(x == 92 && y == 64 && z == 64){
-		// 	printf("%f \n", getValue(0));
-		// }
-
-		// /* Cube is entirely in/out of the surface */
 		if (edgeTable[cubeindex] == 0) return;
 
-		// /* Find the vertices where the surface intersects the cube */
-		float3 vertlist[12];
-		if (edgeTable[cubeindex] & 1)
-			vertlist[0] = VertexInterp(isolevel, getXYZ(0), getXYZ(1), getValue(0), getValue(1));
-		if (edgeTable[cubeindex] & 2)
-			vertlist[1] = VertexInterp(isolevel, getXYZ(1), getXYZ(2), getValue(1), getValue(2));
-		if (edgeTable[cubeindex] & 4)
-			vertlist[2] = VertexInterp(isolevel, getXYZ(2), getXYZ(3), getValue(2), getValue(3));
-		if (edgeTable[cubeindex] & 8)
-			vertlist[3] = VertexInterp(isolevel, getXYZ(3), getXYZ(0), getValue(3), getValue(0));
-		if (edgeTable[cubeindex] & 16)
-			vertlist[4] = VertexInterp(isolevel, getXYZ(4), getXYZ(5), getValue(4), getValue(5));
-		if (edgeTable[cubeindex] & 32)
-			vertlist[5] = VertexInterp(isolevel, getXYZ(5), getXYZ(6), getValue(5), getValue(6));
-		if (edgeTable[cubeindex] & 64)
-			vertlist[6] = VertexInterp(isolevel, getXYZ(6), getXYZ(7), getValue(6), getValue(7));
-		if (edgeTable[cubeindex] & 128)
-			vertlist[7] = VertexInterp(isolevel, getXYZ(7), getXYZ(4), getValue(7), getValue(4));
-		if (edgeTable[cubeindex] & 256)
-			vertlist[8] = VertexInterp(isolevel, getXYZ(0), getXYZ(4), getValue(0), getValue(4));
-		if (edgeTable[cubeindex] & 512)
-			vertlist[9] = VertexInterp(isolevel, getXYZ(1), getXYZ(5), getValue(1), getValue(5));
-		if (edgeTable[cubeindex] & 1024)
-			vertlist[10] = VertexInterp(isolevel ,getXYZ(2), getXYZ(6), getValue(2), getValue(6));
-		if (edgeTable[cubeindex] & 2048)
-			vertlist[11] = VertexInterp(isolevel ,getXYZ(3), getXYZ(7), getValue(3), getValue(7));
+		// list of vertices from isosurface-cube intersections
+		float3 vertices[12];
+		const int* et = edgeTable;
 
-		// Create the triangle
-		for (int i = 0; triTable[cubeindex][i] != -1; i += 3) {
+		// voxels are either "inside" (=0) or "outside" (>0) the isosurce
+		auto getVertex = [](float3 p0, float3 p1, float value_0, float value_1){
+			if(value_0 > 0.0f) return p0;
+			if(value_1 > 0.0f) return p1;
+
+			return p0;
+		};
+
+		if (et[cubeindex] &    1) vertices[ 0] = getVertex(getXYZ(0), getXYZ(1), getValue(0), getValue(1));
+		if (et[cubeindex] &    2) vertices[ 1] = getVertex(getXYZ(1), getXYZ(2), getValue(1), getValue(2));
+		if (et[cubeindex] &    4) vertices[ 2] = getVertex(getXYZ(2), getXYZ(3), getValue(2), getValue(3));
+		if (et[cubeindex] &    8) vertices[ 3] = getVertex(getXYZ(3), getXYZ(0), getValue(3), getValue(0));
+		if (et[cubeindex] &   16) vertices[ 4] = getVertex(getXYZ(4), getXYZ(5), getValue(4), getValue(5));
+		if (et[cubeindex] &   32) vertices[ 5] = getVertex(getXYZ(5), getXYZ(6), getValue(5), getValue(6));
+		if (et[cubeindex] &   64) vertices[ 6] = getVertex(getXYZ(6), getXYZ(7), getValue(6), getValue(7));
+		if (et[cubeindex] &  128) vertices[ 7] = getVertex(getXYZ(7), getXYZ(4), getValue(7), getValue(4));
+		if (et[cubeindex] &  256) vertices[ 8] = getVertex(getXYZ(0), getXYZ(4), getValue(0), getValue(4));
+		if (et[cubeindex] &  512) vertices[ 9] = getVertex(getXYZ(1), getXYZ(5), getValue(1), getValue(5));
+		if (et[cubeindex] & 1024) vertices[10] = getVertex(getXYZ(2), getXYZ(6), getValue(2), getValue(6));
+		if (et[cubeindex] & 2048) vertices[11] = getVertex(getXYZ(3), getXYZ(7), getValue(3), getValue(7));
+
+		// create up to 5 triangles per cube (http://paulbourke.net/geometry/polygonise/marchingsource.cpp)
+		for (int i = 0; i < 5; i++){
+
+			if(triTable[cubeindex][3 * i] < 0) break;
 
 			int index = atomicAdd(&triangles->numTriangles, 1);
 			
 			if(index >= maxTriangles) break;
 
-			triangles->positions[3 * index + 2] = vertlist[triTable[cubeindex][i + 0]];
-			triangles->positions[3 * index + 1] = vertlist[triTable[cubeindex][i + 1]];
-			triangles->positions[3 * index + 0] = vertlist[triTable[cubeindex][i + 2]];
+			triangles->positions[3 * index + 2] = vertices[triTable[cubeindex][3 * i + 0]];
+			triangles->positions[3 * index + 1] = vertices[triTable[cubeindex][3 * i + 1]];
+			triangles->positions[3 * index + 0] = vertices[triTable[cubeindex][3 * i + 2]];
 
 			triangles->colors[3 * index + 2] = (2 * x) | (2 * y) << 8 | (2 * z) << 16;
 			triangles->colors[3 * index + 1] = (2 * x) | (2 * y) << 8 | (2 * z) << 16;
 			triangles->colors[3 * index + 0] = (2 * x) | (2 * y) << 8 | (2 * z) << 16;
 		}
-
-		// if(cubeindex != 0){
-		// 	int index = atomicAdd(&triangles->numTriangles, 1);
-		// }
 
 	});
 
@@ -985,7 +944,7 @@ Triangles* marchingCubes(int gridSize, uint32_t* voxelGrid){
 extern "C" __global__
 void kernel(
 	const Uniforms _uniforms,
-	unsigned int* buffer,
+	uint32_t* buffer,
 	cudaSurfaceObject_t gl_colorbuffer_main,
 	cudaSurfaceObject_t gl_colorbuffer_vr_left,
 	cudaSurfaceObject_t gl_colorbuffer_vr_right,
@@ -1007,6 +966,7 @@ void kernel(
 
 	uint32_t* voxelGrid = allocator->alloc<uint32_t*>(numCells * sizeof(uint32_t));
 
+	// clear/initialize voxel grid, if necessary. Note that this is done every frame.
 	// processRange(0, numCells, [&](int voxelIndex){
 	// 	int x = voxelIndex % gridSize;
 	// 	int y = voxelIndex % (gridSize * gridSize) / gridSize;
@@ -1125,11 +1085,6 @@ void kernel(
 				color = 0x00aaaaaa;
 			}
 
-			// rgba[0] = 255.0f * float(x) / float(texture.width);
-			// rgba[1] = 255.0f * float(y) / float(texture.height);
-			// rgba[2] = 0;
-			// rgba[3] = 255;
-
 			texture.data[index] = color;
 
 		});
@@ -1185,134 +1140,6 @@ void kernel(
 
 	grid.sync();
 
-	{ // generate and draw a ground plane
-		
-		Triangles* triangles = marchingCubes(gridSize, voxelGrid);
-
-		grid.sync();
-
-		// if(grid.thread_rank() == 0){
-		// 	printf("%i \n", triangles->numTriangles);
-		// }
-		
-		RasterizationSettings settings;
-		settings.texture = nullptr;
-		settings.colorMode = COLORMODE_VERTEXCOLOR;
-		settings.world = mat4::identity();
-		settings.view = uniforms.view;
-		settings.proj = uniforms.proj;
-		settings.width = uniforms.width;
-		settings.height = uniforms.height;
-
-		if(uniforms.vrEnabled){
-			settings.view = uniforms.vr_left_view;
-			settings.proj = uniforms.vr_left_proj;
-			settings.width = uniforms.vr_left_width;
-			settings.height = uniforms.vr_left_height;
-			rasterizeTriangles(triangles, fb_vr_left, settings);
-
-			grid.sync();
-
-			settings.view = uniforms.vr_right_view;
-			settings.proj = uniforms.vr_right_proj;
-			settings.width = uniforms.vr_right_width;
-			settings.height = uniforms.vr_right_height;
-			rasterizeTriangles(triangles, fb_vr_right, settings);
-		}else{
-			settings.view = uniforms.view;
-			settings.proj = uniforms.proj;
-			settings.width = uniforms.width;
-			settings.height = uniforms.height;
-
-			rasterizeTriangles(triangles, framebuffer, settings);
-		}
-	}
-
-	grid.sync();
-
-	// if(false)
-	{ // draw the triangle mesh that was passed to this kernel
-		Triangles* triangles = allocator->alloc<Triangles*>(sizeof(Triangles));
-		triangles->numTriangles = numTriangles;
-
-		triangles->positions = positions;
-		triangles->uvs = uvs;
-		triangles->colors = colors;
-
-		Texture texture;
-		texture.width  = 1024;
-		texture.height = 1024;
-		texture.data   = textureData;
-
-		RasterizationSettings settings;
-		settings.texture = &texture;
-		settings.colorMode = uniforms.colorMode;
-		settings.world = uniforms.world;
-
-		// rasterizeTriangles(triangles, framebuffer, settings);
-		{
-			float s = 0.8f;
-			mat4 rot = mat4::rotate(0.5f * PI, {1.0f, 0.0f, 0.0f}).transpose();
-			mat4 translate = mat4::translate(0.0f, 0.0f, 0.0f);
-			mat4 scale = mat4::scale(s, s, s);
-			mat4 wiggle = mat4::rotate(cos(5.0f * uniforms.time) * 0.1f, {0.0f, 1.0f, 0.0f}).transpose();
-			mat4 wiggle_yaw = mat4::rotate(cos(5.0f * uniforms.time) * 0.1f, {0.0f, 0.0f, 1.0f}).transpose();
-			
-			settings.world = translate * wiggle * wiggle_yaw * rot * scale;
-
-			
-			if(uniforms.vrEnabled){
-
-				if(uniforms.vr_left_controller_active){
-					settings.world = rot * uniforms.vr_left_controller_pose.transpose() * mat4::scale(0.1f, 0.1f, 0.1f);
-
-					settings.view = uniforms.vr_left_view;
-					settings.proj = uniforms.vr_left_proj;
-					settings.width = uniforms.vr_left_width;
-					settings.height = uniforms.vr_left_height;
-					rasterizeTriangles(triangles, fb_vr_left, settings);
-
-					grid.sync();
-
-					settings.view = uniforms.vr_right_view;
-					settings.proj = uniforms.vr_right_proj;
-					settings.width = uniforms.vr_right_width;
-					settings.height = uniforms.vr_right_height;
-					rasterizeTriangles(triangles, fb_vr_right, settings);
-				}
-
-				if(uniforms.vr_right_controller_active){
-					settings.world = rot * uniforms.vr_right_controller_pose.transpose() * mat4::scale(0.1f, 0.1f, 0.1f);
-
-					settings.view = uniforms.vr_left_view;
-					settings.proj = uniforms.vr_left_proj;
-					settings.width = uniforms.vr_left_width;
-					settings.height = uniforms.vr_left_height;
-					rasterizeTriangles(triangles, fb_vr_left, settings);
-
-					grid.sync();
-
-					settings.view = uniforms.vr_right_view;
-					settings.proj = uniforms.vr_right_proj;
-					settings.width = uniforms.vr_right_width;
-					settings.height = uniforms.vr_right_height;
-					rasterizeTriangles(triangles, fb_vr_right, settings);
-				}
-			}else{
-				settings.view = uniforms.view;
-				settings.proj = uniforms.proj;
-				settings.width = uniforms.width;
-				settings.height = uniforms.height;
-
-				rasterizeTriangles(triangles, framebuffer, settings);
-			}
-
-			grid.sync();
-		}
-	}
-
-	grid.sync();
-
 	// VOXEL PAINTING / CONTROLLER INPUT
 	if(grid.thread_rank() == 0){
 
@@ -1360,8 +1187,6 @@ void kernel(
 				float dz = vcz - fz;
 				float dd = dx * dx + dy * dy + dz * dz;
 
-				// printf("%f \n", pos.x)-+;
-
 				if(dd < brushRadius2){
 					voxelGrid[voxelIndex] = 123;
 				}
@@ -1404,8 +1229,6 @@ void kernel(
 				float dz = vcz - fz;
 				float dd = dx * dx + dy * dy + dz * dz;
 
-				// printf("%f \n", pos.x)-+;
-
 				if(dd < brushRadius2){
 					voxelGrid[voxelIndex] = 0;
 				}
@@ -1415,6 +1238,131 @@ void kernel(
 
 	grid.sync();
 
+	{ // DRAW VOXEL GRID
+		
+		Triangles* triangles = marchingCubes(gridSize, voxelGrid);
+
+		grid.sync();
+		
+		RasterizationSettings settings;
+		settings.texture = nullptr;
+		settings.colorMode = COLORMODE_VERTEXCOLOR;
+		settings.world = mat4::identity();
+		settings.view = uniforms.view;
+		settings.proj = uniforms.proj;
+		settings.width = uniforms.width;
+		settings.height = uniforms.height;
+
+		if(uniforms.vrEnabled){
+			settings.view = uniforms.vr_left_view;
+			settings.proj = uniforms.vr_left_proj;
+			settings.width = uniforms.vr_left_width;
+			settings.height = uniforms.vr_left_height;
+			rasterizeTriangles(triangles, fb_vr_left, settings);
+
+			grid.sync();
+
+			settings.view = uniforms.vr_right_view;
+			settings.proj = uniforms.vr_right_proj;
+			settings.width = uniforms.vr_right_width;
+			settings.height = uniforms.vr_right_height;
+			rasterizeTriangles(triangles, fb_vr_right, settings);
+		}else{
+			settings.view = uniforms.view;
+			settings.proj = uniforms.proj;
+			settings.width = uniforms.width;
+			settings.height = uniforms.height;
+
+			rasterizeTriangles(triangles, framebuffer, settings);
+		}
+	}
+
+	grid.sync();
+
+	{ // DRAW CONTROLLERS
+		Triangles* triangles = allocator->alloc<Triangles*>(sizeof(Triangles));
+		triangles->numTriangles = numTriangles;
+
+		triangles->positions = positions;
+		triangles->uvs = uvs;
+		triangles->colors = colors;
+
+		Texture texture;
+		texture.width  = 1024;
+		texture.height = 1024;
+		texture.data   = textureData;
+
+		RasterizationSettings settings;
+		settings.texture = &texture;
+		settings.colorMode = uniforms.colorMode;
+		settings.world = uniforms.world;
+
+		{
+			float s = 0.8f;
+			mat4 rot = mat4::rotate(0.5f * PI, {1.0f, 0.0f, 0.0f}).transpose();
+			mat4 translate = mat4::translate(0.0f, 0.0f, 0.0f);
+			mat4 scale = mat4::scale(s, s, s);
+			mat4 wiggle = mat4::rotate(cos(5.0f * uniforms.time) * 0.1f, {0.0f, 1.0f, 0.0f}).transpose();
+			mat4 wiggle_yaw = mat4::rotate(cos(5.0f * uniforms.time) * 0.1f, {0.0f, 0.0f, 1.0f}).transpose();
+			
+			settings.world = translate * wiggle * wiggle_yaw * rot * scale;
+
+			
+			if(uniforms.vrEnabled){
+
+				float sController = 0.05f;
+				if(uniforms.vr_left_controller_active){
+					settings.world = rot * uniforms.vr_left_controller_pose.transpose() 
+						* mat4::scale(sController, sController, sController);
+
+					settings.view = uniforms.vr_left_view;
+					settings.proj = uniforms.vr_left_proj;
+					settings.width = uniforms.vr_left_width;
+					settings.height = uniforms.vr_left_height;
+					rasterizeTriangles(triangles, fb_vr_left, settings);
+
+					grid.sync();
+
+					settings.view = uniforms.vr_right_view;
+					settings.proj = uniforms.vr_right_proj;
+					settings.width = uniforms.vr_right_width;
+					settings.height = uniforms.vr_right_height;
+					rasterizeTriangles(triangles, fb_vr_right, settings);
+				}
+
+				if(uniforms.vr_right_controller_active){
+					settings.world = rot * uniforms.vr_right_controller_pose.transpose() 
+						* mat4::scale(sController, sController, sController);
+
+					settings.view = uniforms.vr_left_view;
+					settings.proj = uniforms.vr_left_proj;
+					settings.width = uniforms.vr_left_width;
+					settings.height = uniforms.vr_left_height;
+					rasterizeTriangles(triangles, fb_vr_left, settings);
+
+					grid.sync();
+
+					settings.view = uniforms.vr_right_view;
+					settings.proj = uniforms.vr_right_proj;
+					settings.width = uniforms.vr_right_width;
+					settings.height = uniforms.vr_right_height;
+					rasterizeTriangles(triangles, fb_vr_right, settings);
+				}
+			}else{
+				settings.view = uniforms.view;
+				settings.proj = uniforms.proj;
+				settings.width = uniforms.width;
+				settings.height = uniforms.height;
+
+				rasterizeTriangles(triangles, framebuffer, settings);
+			}
+
+			grid.sync();
+		}
+	}
+
+
+	grid.sync();
 
 	// draws voxels as point sprites
 	// now using marching cubes instead
@@ -1456,166 +1404,9 @@ void kernel(
 
 	uint32_t& maxNanos = *allocator->alloc<uint32_t*>(4);
 
-	// if colored by normalized time, we compute the max time for normalization
-	if(uniforms.colorMode == COLORMODE_TIME_NORMALIZED){
-		if(grid.thread_rank() == 0){
-			maxNanos = 0;
-		}
-		grid.sync();
-
-		processRange(0, uniforms.width * uniforms.height, [&](int pixelIndex){
-
-			int x = pixelIndex % int(uniforms.width);
-			int y = pixelIndex / int(uniforms.width);
-
-			uint64_t encoded = framebuffer[pixelIndex];
-			uint32_t color = encoded & 0xffffffffull;
-
-			if(color != BACKGROUND_COLOR){
-				atomicMax(&maxNanos, color);
-			}
-		});
-
-		grid.sync();
-	}
-
-	// // ray tracing test
-	// float4 p_00;
-	// float4 p_10;
-	// float4 p_11;
-	// float4 p_01;
-	// // if(grid.thread_rank() == 0)
-	// {
-	// 	p_00 = uniforms.proj_inv * float4{-1.0f, -1.0f, -1.0f, 1.0f};
-	// 	p_10 = uniforms.proj_inv * float4{ 1.0f, -1.0f, -1.0f, 1.0f};
-	// 	p_11 = uniforms.proj_inv * float4{ 1.0f,  1.0f, -1.0f, 1.0f};
-	// 	p_01 = uniforms.proj_inv * float4{-1.0f,  1.0f, -1.0f, 1.0f};
-
-	// 	p_00 = p_00 / p_00.w;
-	// 	p_10 = p_10 / p_10.w;
-	// 	p_11 = p_11 / p_11.w;
-	// 	p_01 = p_01 / p_01.w;
-
-	// 	// printf("====== \n");
-	// 	// printf("p_00: %f, %f, %f, %f \n", p_00.x, p_00.y, p_00.z, p_00.w);
-	// 	// printf("p_10: %f, %f, %f, %f \n", p_10.x, p_10.y, p_10.z, p_10.w);
-	// 	// printf("p_11: %f, %f, %f, %f \n", p_11.x, p_11.y, p_11.z, p_11.w);
-	// 	// printf("p_01: %f, %f, %f, %f \n", p_01.x, p_01.y, p_01.z, p_01.w);
-	// }
-
-	// grid.sync();
-
-	// { // draw the triangle mesh that was passed to this kernel
-	// 	Triangles* triangles = allocator->alloc<Triangles*>(sizeof(Triangles));
-	// 	triangles->numTriangles = numTriangles;
-
-	// 	triangles->positions = positions;
-	// 	triangles->uvs = uvs;
-	// 	triangles->colors = colors;
-
-	// 	Texture texture;
-	// 	texture.width  = 1024;
-	// 	texture.height = 1024;
-	// 	texture.data   = textureData;
-
-	// 	RasterizationSettings settings;
-	// 	settings.texture = &texture;
-	// 	settings.colorMode = uniforms.colorMode;
-	// 	settings.world = uniforms.world;
-
-	// 	// rasterizeTriangles(triangles, framebuffer, settings);
-	// 	// for(float4 pos : {p_11})
-	// 	for(float4 pos : {p_00, p_10, p_01, p_11})
-	// 	{
-	// 		float s = 0.01f;
-	// 		settings.world = uniforms.view_inv * mat4::translate(pos.x, pos.y, pos.z) * mat4::scale(s, s, s);
-
-	// 		settings.view = uniforms.view;
-	// 		settings.proj = uniforms.proj;
-	// 		settings.width = uniforms.width;
-	// 		settings.height = uniforms.height;
-
-	// 		rasterizeTriangles(triangles, framebuffer, settings);
-			
-	// 		grid.sync();
-	// 	}
-	// }
-
-	// grid.sync();
-
-	// // TRY RAY TRACING ?!?
-	// // if(false)
-	// processRange(0, uniforms.width * uniforms.height, [&](int pixelIndex){
-
-	// 	int x = pixelIndex % int(uniforms.width);
-	// 	int y = pixelIndex / int(uniforms.width);
-
-	// 	float u = float(x) / uniforms.width;
-	// 	float v = float(y) / uniforms.height;
-
-	// 	uint32_t color;
-	// 	uint8_t* rgba = (uint8_t*)&color;
-	// 	rgba[0] = 255.0f * u;
-	// 	rgba[1] = 255.0f * v;
-	// 	rgba[2] = 0;
-	// 	rgba[3] = 0;
-
-	// 	float3 origin = make_float3(uniforms.view_inv * float4{0.0f, 0.0f, 0.0f, 1.0f});
-		
-	// 	float dx = (1.0f - u) * p_00.x + u * p_10.x;
-	// 	float dy = (1.0f - u) * p_00.x + u * p_01.x;
-	// 	float dz = p_00.z;
-	// 	float3 dir_obj = {dx, dy, dz};
-	// 	float3 dir = make_float3(uniforms.view_inv * float4{dx, dy, dz, 1.0f});
-	// 	dir = dir - origin;
-
-	// 	// dir = dir * -1.0f;
-	// 	dir = normalize(dir);
-
-	// 	// ray sphere, from https://www.scratchapixel.com/lessons/3d-basic-rendering/minimal-ray-tracer-rendering-simple-shapes/ray-sphere-intersection.html
-	// 	bool isIntersecting = false;
-		
-	// 	float radius = 1.0f;
-	// 	float radius2 = radius * radius;
-	// 	float3 spherePos = {0.0f, 0.0f, 0.0f};
-	// 	float3 L = spherePos - origin;
-
-	// 	float tc = dot(L, dir);
-
-	// 	if(tc < 0.0f) return;
-
-	// 	float d2 = tc * tc - dot(L, L);
-
-	// 	if(d2 > radius2) return;
-
-	// 	float t1c = sqrt(radius2 - d2);
-		
-	// 	float t1 = tc - t1c;
-	// 	float t2 = tc + t1c;
-
-	// 	rgba[0] = 200 * t1c;
-	// 	rgba[1] = 0;
-	// 	rgba[2] = 0;
-	// 	rgba[3] = 0;
-
-	// 	if(isIntersecting){
-	// 		rgba[0] = 0x0000ff00;
-	// 	}else{
-	// 		// rgba[0] = 0x00ff0000;
-	// 	}
-
-	// 	uint64_t depth = 0;
-
-	// 	uint64_t encoded = (depth << 32) | color;
-
-	// 	// if(isIntersecting)
-	// 	// framebuffer[pixelIndex] = encoded;
-
-	// });
-
 	grid.sync();
 
-	// transfer framebuffer to opengl texture
+	// TRANSFER TO OPENGL TEXTURE
 	if(uniforms.vrEnabled){
 		
 		// left

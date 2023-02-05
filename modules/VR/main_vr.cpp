@@ -289,7 +289,7 @@ void initCudaProgram(
 
 	cuda_program = new CudaModularProgram({
 		.modules = {
-			"./modules/VR/rasterize.cu",
+			"./modules/VR/voxelpainter.cu",
 			"./modules/VR/utils.cu",
 		},
 		.kernels = {"kernel"}
