@@ -13,6 +13,8 @@ Most relevant code sections are found in [main_vr.cpp](../modules/VR/main_vr.cpp
 
 This tech demo was created during the [2023 global game jam](https://globalgamejam.org/2023/jam-sites/tu-wien-ggj23).
 
+<img src="./voxelpainter_small.gif" width="600px">
+
 # Getting Started
 
 * Clone the repository.

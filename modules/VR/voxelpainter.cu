@@ -990,9 +990,6 @@ void kernel(
 	// 	voxelGrid[voxelIndex] = 0;
 	// });
 
-	// if(grid.thread_rank() == 0){
-	// 	printf("%llu \n", uniforms.vr_right_controller_state.buttonPressedMask);
-	// }
 
 	// allocate framebuffer memory
 	int framebufferSize = int(uniforms.width) * int(uniforms.height) * sizeof(uint64_t);
@@ -1152,7 +1149,7 @@ void kernel(
 		// printf("%llu \n", leftTriggerButtonDown);
 		
 		if(rightTriggerButtonDown){
-			float brushRadius = 2.0;
+			float brushRadius = 3.0;
 			int iBrushRadius = ceil(brushRadius);
 			float brushRadius2 = brushRadius * brushRadius;
 			
@@ -1194,7 +1191,7 @@ void kernel(
 		}
 
 		if(leftTriggerButtonDown){
-			float brushRadius = 3.0;
+			float brushRadius = 5.0;
 			int iBrushRadius = ceil(brushRadius);
 			float brushRadius2 = brushRadius * brushRadius;
 			
