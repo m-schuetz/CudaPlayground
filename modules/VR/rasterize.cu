@@ -733,8 +733,8 @@ void rasterizeVoxels(
 					uint64_t color = 0x000000ff;
 					uint64_t idepth = *((uint32_t*)&pos.w);
 
-					int spriteRadius = voxelSize_screen / 2.0f + 1.0f;
-					// int spriteRadius = 4;
+					// int spriteRadius = voxelSize_screen / 2.0f + 1.0f;
+					int spriteRadius = 4;
 					int spriteSize = 2 * spriteRadius + 1;
 					for(int ox = -spriteRadius; ox <= spriteRadius; ox++)
 					for(int oy = -spriteRadius; oy <= spriteRadius; oy++)
@@ -815,18 +815,42 @@ Triangles* marchingCubes(int gridSize, uint32_t* voxelGrid){
 	triangles->numTriangles = 0;
 	float3 boxSize = gridMax - gridMin;
 
+	// float brushRadius = 2.0;
+	// float3 controllerPos_world;
+	// float3 controllerPos_voxelgrid;
+	// if(uniforms.vrEnabled){
+	// 	mat4 rot = mat4::rotate(0.5f * PI, {1.0f, 0.0f, 0.0f}).transpose();
+	// 	float4 pos = rot * uniforms.vr_right_controller_pose.transpose() * float4{0.0f, 0.0f, 0.0f, 1.0f};
+	// 	float3 boxSize = gridMax - gridMin;
+
+	// 	float fx = gridSize * (pos.x - gridMin.x) / boxSize.x;
+	// 	float fy = gridSize * (pos.y - gridMin.y) / boxSize.y;
+	// 	float fz = gridSize * (pos.z - gridMin.z) / boxSize.z;
+
+	// 	int ix = fx;
+	// 	int iy = fy;
+	// 	int iz = fz;
+
+	// 	controllerPos_world = {pos.x, pos.y, pos.z};
+	// 	controllerPos_voxelgrid = {fx, fy, fz};
+	// }
+
 	grid.sync();
 
-	int gm1 = gridSize - 1;
-	processRange(0, gm1 * gm1 * gm1, [&](int voxelIndex){
+	// int gm1 = gridSize - 1;
+	processRange(0, gridSize * gridSize * gridSize, [&](int voxelIndex){
 
-		int x = voxelIndex % gm1;
-		int y = (voxelIndex % (gm1 * gm1)) / gm1;
-		int z = voxelIndex / (gm1 * gm1);
+		int x = voxelIndex % gridSize;
+		int y = (voxelIndex % (gridSize * gridSize)) / gridSize;
+		int z = voxelIndex / (gridSize * gridSize);
+
+		if(x >= gridSize - 1) return;
+		if(y >= gridSize - 1) return;
+		if(z >= gridSize - 1) return;
 
 
 		auto to1DIndex = [&](int x, int y, int z){
-			return x + y * gm1 + z * gm1 * gm1;
+			return x + y * gridSize + z * gridSize * gridSize;
 		};
 
 		auto fromMCIndex = [&](int index) -> int3{
@@ -879,9 +903,9 @@ Triangles* marchingCubes(int gridSize, uint32_t* voxelGrid){
 		if(getValue(6) > isolevel) cubeindex |=  64;
 		if(getValue(7) > isolevel) cubeindex |= 128;
 
-		if(x == 92 && y == 64 && z == 64){
-			printf("%f \n", getValue(0));
-		}
+		// if(x == 92 && y == 64 && z == 64){
+		// 	printf("%f \n", getValue(0));
+		// }
 
 		// /* Cube is entirely in/out of the surface */
 		if (edgeTable[cubeindex] == 0) return;
@@ -963,27 +987,28 @@ void kernel(
 
 	uint32_t* voxelGrid = allocator->alloc<uint32_t*>(numCells * sizeof(uint32_t));
 
-	processRange(0, numCells, [&](int voxelIndex){
-		int x = voxelIndex % gridSize;
-		int y = voxelIndex % (gridSize * gridSize) / gridSize;
-		int z = voxelIndex / (gridSize * gridSize);
+	// processRange(0, numCells, [&](int voxelIndex){
+	// 	int x = voxelIndex % gridSize;
+	// 	int y = voxelIndex % (gridSize * gridSize) / gridSize;
+	// 	int z = voxelIndex / (gridSize * gridSize);
 
-		float fx = 2.0f * float(x) / fGridSize - 1.0f;
-		float fy = 2.0f * float(y) / fGridSize - 1.0f;
-		float fz = 2.0f * float(z) / fGridSize - 1.0f;
+	// 	float fx = 2.0f * float(x) / fGridSize - 1.0f;
+	// 	float fy = 2.0f * float(y) / fGridSize - 1.0f;
+	// 	float fz = 2.0f * float(z) / fGridSize - 1.0f;
 
-		if(fx * fx + fy * fy + fz * fz < 0.2f){
-			voxelGrid[voxelIndex] = 123;
-		}else{
-			voxelGrid[voxelIndex] = 0;
-		}
+	// 	// clear and make sphere and ground plane
+	// 	// if(fx * fx + fy * fy + fz * fz < 0.1f){
+	// 	// 	voxelGrid[voxelIndex] = 123;
+	// 	// }else if(x > 10 && x < gridSize - 10 && z < 4){
+	// 	// 	voxelGrid[voxelIndex] = 123;
 
-		// if(z == 10){
-		// 	voxelGrid[voxelIndex] = 123;
-		// }else{
-		// 	voxelGrid[voxelIndex] = 0;
-		// }
-	});
+	// 	// }else{
+	// 	// 	voxelGrid[voxelIndex] = 0;
+	// 	// }
+
+	// 	// clear everything
+	// 	voxelGrid[voxelIndex] = 0;
+	// });
 
 	// allocate framebuffer memory
 	int framebufferSize = int(uniforms.width) * int(uniforms.height) * sizeof(uint64_t);
@@ -1264,8 +1289,12 @@ void kernel(
 
 	grid.sync();
 
-	// VOXEL PAINTING
+	// VOXEL PAINTING / CONTROLLER INPUT
 	if(grid.thread_rank() == 0){
+
+		float brushRadius = 2.0;
+		int iBrushRadius = ceil(brushRadius);
+		float brushRadius2 = brushRadius * brushRadius;
 		
 		mat4 rot = mat4::rotate(0.5f * PI, {1.0f, 0.0f, 0.0f}).transpose();
 		float4 pos = rot * uniforms.vr_right_controller_pose.transpose() * float4{0.0f, 0.0f, 0.0f, 1.0f};
@@ -1275,60 +1304,89 @@ void kernel(
 		float fy = gridSize * (pos.y - gridMin.y) / boxSize.y;
 		float fz = gridSize * (pos.z - gridMin.z) / boxSize.z;
 
-		int ix = fx;
-		int iy = fy;
-		int iz = fz;
-		int voxelIndex = ix + iy * gridSize + iz * gridSize * gridSize;
+		// int ix = fx;
+		// int iy = fy;
+		// int iz = fz;
+		// int voxelIndex = ix + iy * gridSize + iz * gridSize * gridSize;
 
-		if(0 <= ix && ix < gridSize)
-		if(0 <= iy && iy < gridSize)
-		if(0 <= iz && iz < gridSize)
+		// if(0 <= ix && ix < gridSize)
+		// if(0 <= iy && iy < gridSize)
+		// if(0 <= iz && iz < gridSize)
+		// {
+		// 	voxelGrid[voxelIndex] = 123;
+		// }
+
+		for(int ox = -iBrushRadius; ox <= brushRadius; ox++)
+		for(int oy = -iBrushRadius; oy <= brushRadius; oy++)
+		for(int oz = -iBrushRadius; oz <= brushRadius; oz++)
 		{
-			voxelGrid[voxelIndex] = 123;
+
+			int ix = fx + float(ox);
+			int iy = fy + float(oy);
+			int iz = fz + float(oz);
+
+			if(ix < 0 || ix >= gridSize) continue;
+			if(iy < 0 || iy >= gridSize) continue;
+			if(iz < 0 || iz >= gridSize) continue;
+
+			int voxelIndex = ix + iy * gridSize + iz * gridSize * gridSize;
+
+			float vcx = float(ix) + 0.5f;
+			float vcy = float(iy) + 0.5f;
+			float vcz = float(iz) + 0.5f;
+			float dx = vcx - fx;
+			float dy = vcy - fy;
+			float dz = vcz - fz;
+			float dd = dx * dx + dy * dy + dz * dz;
+
+			// printf("%f \n", pos.x)-+;
+
+			if(dd < brushRadius2){
+				voxelGrid[voxelIndex] = 123;
+			}
+
+
 		}
-
-
-
 	}
 
 	grid.sync();
 
 
-	{ // DRAW VOXELS
-		int numTargets;
-		RenderTarget targets[3];
+	// draws voxels as point sprites
+	// now using marching cubes instead
+	// { // DRAW VOXELS
+	// 	int numTargets;
+	// 	RenderTarget targets[3];
 
-		if(uniforms.vrEnabled){
-			numTargets = 2;
+	// 	if(uniforms.vrEnabled){
+	// 		numTargets = 2;
 
-			targets[0].view = uniforms.vr_left_view;
-			targets[0].proj = uniforms.vr_left_proj;
-			targets[0].transform = uniforms.vr_left_proj * uniforms.vr_left_view;
-			targets[0].framebuffer = fb_vr_left;
-			targets[0].width = uniforms.vr_left_width;
-			targets[0].height = uniforms.vr_left_height;
+	// 		targets[0].view = uniforms.vr_left_view;
+	// 		targets[0].proj = uniforms.vr_left_proj;
+	// 		targets[0].transform = uniforms.vr_left_proj * uniforms.vr_left_view;
+	// 		targets[0].framebuffer = fb_vr_left;
+	// 		targets[0].width = uniforms.vr_left_width;
+	// 		targets[0].height = uniforms.vr_left_height;
 
-			targets[1].view = uniforms.vr_right_view;
-			targets[1].proj = uniforms.vr_right_proj;
-			targets[1].transform = uniforms.vr_right_proj * uniforms.vr_right_view;
-			targets[1].framebuffer = fb_vr_right;
-			targets[1].width = uniforms.vr_right_width;
-			targets[1].height = uniforms.vr_right_height;
-		}else{
-			numTargets = 1;
+	// 		targets[1].view = uniforms.vr_right_view;
+	// 		targets[1].proj = uniforms.vr_right_proj;
+	// 		targets[1].transform = uniforms.vr_right_proj * uniforms.vr_right_view;
+	// 		targets[1].framebuffer = fb_vr_right;
+	// 		targets[1].width = uniforms.vr_right_width;
+	// 		targets[1].height = uniforms.vr_right_height;
+	// 	}else{
+	// 		numTargets = 1;
 
-			targets[0].view = uniforms.view;
-			targets[0].proj = uniforms.proj;
-			targets[0].transform = uniforms.proj * uniforms.view;
-			targets[0].framebuffer = framebuffer;
-			targets[0].width = uniforms.width;
-			targets[0].height = uniforms.height;
-		}
+	// 		targets[0].view = uniforms.view;
+	// 		targets[0].proj = uniforms.proj;
+	// 		targets[0].transform = uniforms.proj * uniforms.view;
+	// 		targets[0].framebuffer = framebuffer;
+	// 		targets[0].width = uniforms.width;
+	// 		targets[0].height = uniforms.height;
+	// 	}
 
-		rasterizeVoxels(gridSize, numCells, voxelGrid, numTargets, targets);
-
-
-	}
+	// 	rasterizeVoxels(gridSize, numCells, voxelGrid, numTargets, targets);
+	// }
 
 	grid.sync();
 
