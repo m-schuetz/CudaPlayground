@@ -32,7 +32,54 @@ This tech demo mostly takes place in [main_vr.cpp](../modules/VR/main_vr.cpp) an
 
 The following subsections briefly explain some details and design choices.
 
-## Allocation
+## Voxel Grid and Marching Cubes
+
+See [marchingCubes()](https://github.com/m-schuetz/CudaPlayground/blob/24aaca3eb8c63c2c2836127927aeedc843514755/modules/VR/voxelpainter.cu#L817)
+
+This tech demo uses a voxel grid with a size of 128³ cells. Each cell can be either empty or filled. Marching Cubes[1,2] is then used to create triangles along borders between empty and filled voxels. 
+
+## Triangle Rasterization
+
+See [rasterizeTriangles()](https://github.com/m-schuetz/CudaPlayground/blob/24aaca3eb8c63c2c2836127927aeedc843514755/modules/VR/voxelpainter.cu#L463)
+
+The triangle rasterizer utilizes one block of threads for each triangle. Each block grabs an unrendered triangle, computes its screen-space bounding box, and then iterates over all fragments utilizing one threads per fragment. If the fragment is within the triangle, then the corresponding pixel is colored accordingly. 
+
+The reason for utilizing one thread block comprising 128 threads per triangle is that otherwise, huge triangles would lead to extremely low frame rates. With 128 threads per triangle, the worst-case times are far better, but the best-case times are far worse. Better approaches might instead split large triangles into smaller work packages and utilize one thread per package. Also, Nanite[3] has shown that utilizing one thread per triangle can lead to 3x performance improvements over the native hardware rasterizer in case of small triangles, so future work might be able to build competitive triangle rasterizers[4] or point rasterizers[5] in CUDA.
+
+## Megakernels
+
+Typically if you have multiple passes that depend on previous results, or passes with different workload sizes and parallelism, you'd invoke multiple kernels with the proper amount of workgroups and threads per workgroup. However, this application is written in one single kernel that is invoked once per frame, so syncing between passes and distributing workload to all available threads is necessary.
+
+### Syncing
+If one pass depends on the results of a previous pass, we can add a sync point to wait until all threads have finished with the previous pass. In CUDA, we can globaly sync all threads with cooperative groups using cooperative_groups::this_grid.snc() (shortened to grid.sync()). grid.sync() is used liberally throughout the application, for example after clearing the framebuffers to make sure they are fully cleared before they are used, or between updating and meshing the voxel grid.
+
+### Parallelism / Amount of workgroups
+
+The kernel is launched once per frame with as many workgroups as the streaming multiprocessors (SM) can keep active. We use ```cuOccupancyMaxActiveBlocksPerMultiprocessor``` to find how many blocks each SM can process concurently, and launch with ```cuLaunchCooperativeKernel```. When implementing custom global sync via spinlock, this would be important because otherwise some threads would spin forever, waiting for threads that never get their turn because the spinning threads occupy all the SMs. If we only launch as many workgroups/threads as the SMs can keep active, this type of deadlock won't happen. I asume that this is one of the reasons why cooperative groups require a special ```cuLaunchCooperativeKernel``` launch call that prevents you from launching too many workgroups.
+
+### processRange helper function
+
+Different passes have very different workloads, ranging from modifying one single global value to 128³ voxel cells to width * height pixels. With processRange(), we can distribute a variable amount of function calls to all the threads that we've spawned this frame.
+
+```C++
+// process all 128³ cells of the voxel grid.
+// the 128³ function calls are distributed to all spawned workgroups and threads
+processRange(0, 128 * 128 * 128, [&](int voxelIndex){ 
+	// update voxel cell
+});
+```
+
+```C++
+// process all width * height pixels of the framebuffer
+// the width * height function calls are distributed to all spawned workgroups and threads
+processRange(0, 128 * 128 * 128, [&](int pixelIndex){ 
+	// update pixel
+});
+```
+
+
+
+## Allocations
 
 The CUDA kernel is called once per frame and needs to hold persistent memory that is reused in future kernel invocations (e.g. voxel grid) as well as temporary memory that is cleared and rebuilt from scratch each frame (e.g. framebuffers). To achieve this, we pass a large byte array to the kernel ``` kernel(..., uint32_t* buffer, ...) ``` and use a custom allocator that reserves memory from that buffer. 
 
@@ -52,7 +99,11 @@ uint64_t* fb_vr_left  = allocator->alloc<uint64_t*>(vr_width * vr_height * sizeo
 uint64_t* fb_vr_right = allocator->alloc<uint64_t*>(vr_width * vr_height * sizeof(uint64_t));
 ```
 
-## Voxel Grid and Marching Cubes
 
-This tech demo uses a voxel grid with a size of 128³ cells. Each cell can be either empty or filled. 
+# References
 
+* [1] http://paulbourke.net/geometry/polygonise/
+* [2] [Marching cubes: A high resolution 3D surface construction algorithm](https://dl.acm.org/doi/abs/10.1145/37402.37422)
+* [3] [A Deep Dive into Nanite](https://www.youtube.com/watch?v=eviSykqSUUw)
+* [4] [High-performance software rasterization on GPUs](https://dl.acm.org/doi/abs/10.1145/2018323.2018337)
+* [5] [Software Rasterization of 2 Billion Points in Real Time](https://arxiv.org/abs/2204.01287)
