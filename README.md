@@ -6,6 +6,15 @@ This project provides basic templates of a cuda programs that can be <b>modified
 
 Several example programs are provided, one using the console and others using OpenGL interop to draw an image with CUDA and display the resulting image with OpenGL.
 
+## VR Voxel Painter
+
+Main: [main_rasterize_triangles.cpp](./modules/VR/main_vr.cpp) <br>
+Kernel: [rasterize.cu](./modules/VR/voxelpainter.cu)
+
+A virtual reality voxel painter that entirely runs in a single CUDA kernel, including game logic, meshing via marching cubes and triangle rasterization. A more detailed documentation is found in [./docs/voxelpainter.md](./docs/voxelpainter.md).
+
+<img src="./docs/voxelpainter_small.gif">
+
 ## CUDA Triangle Rasterizer
 
 Main: [main_rasterize_triangles.cpp](./modules/rasterizeTriangles/main_rasterize_triangles.cpp) <br>
