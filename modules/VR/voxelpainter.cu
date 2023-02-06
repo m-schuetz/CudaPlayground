@@ -460,6 +460,7 @@ uint32_t sample_linear(float2 uv, Texture* texture){
 // - <framebuffer> stores interleaved 32bit depth and color values
 // - The closest fragments are rendered via atomicMin on a combined 64bit depth&color integer
 //   atomicMin(&framebuffer[pixelIndex], (depth << 32 | color)); 
+// see http://www.sunshine2k.de/coding/java/TriangleRasterization/TriangleRasterization.html#algo3
 void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, RasterizationSettings settings){
 
 	auto grid = cg::this_grid();
