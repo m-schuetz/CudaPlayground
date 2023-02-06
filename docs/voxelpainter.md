@@ -7,13 +7,12 @@
 
 <b>Results: </b> This voxel painter runs at 90fps at a resolution of 2468x2740 per eye on an RTX 3090. In non-VR mode, it runs at around 280fps (after some painting) to 360fps (nothing painted) at a resolution of 2560x1140.
 
-
 Most relevant code sections are found in [main_vr.cpp](../modules/VR/main_vr.cpp) and especially [voxelpainter.cu](../modules/VR/voxelpainter.cu)
-
 
 This tech demo was created during the [2023 global game jam](https://globalgamejam.org/2023/jam-sites/tu-wien-ggj23).
 
-<img src="./voxelpainter_small.gif" width="600px">
+https://user-images.githubusercontent.com/6705073/216948763-1754c40a-0244-453b-851b-b42ef4b0c852.mp4
+
 
 # Getting Started
 
