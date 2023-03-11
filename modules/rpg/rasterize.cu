@@ -186,7 +186,7 @@ void drawText(const char* text, float x, float y, float fontsize){
 			int sy = tilesize * v;
 			int sourceTexel = sx + sy * NUM_CHARS * tilesize;
 
-			uint32_t color = color = image[sourceTexel];
+			uint32_t color = image[sourceTexel];
 			uint8_t* rgba = (uint8_t*)&color;
 
 			int t_x = l_x + x + i * fontsize;
