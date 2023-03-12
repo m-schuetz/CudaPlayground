@@ -195,29 +195,37 @@ int main(){
 
 	initCuda();
 
-	auto asciidata = readBinaryFile("./resources/tilesets/ascii_16.png");
 	vector<uint8_t> img_ascii_16;
-	uint32_t width;
-	uint32_t height;
-	lodepng::decode(
-		img_ascii_16, 
-		width, height, 
-		(const unsigned char*)asciidata->data_char, 
-		size_t(asciidata->size));
+	{
+		auto asciidata = readBinaryFile("./resources/tilesets/ascii_16.png");
+		uint32_t width;
+		uint32_t height;
+		lodepng::decode(
+			img_ascii_16, 
+			width, height, 
+			(const unsigned char*)asciidata->data_char, 
+			size_t(asciidata->size));
+	}
 	
 
 	model = ObjLoader::load("./resources/spot/spot_triangulated.obj");
-	auto ppmdata = readBinaryFile("./modules/rpg/resources/seasonal sample (summer).ppm", 38, 1000000000000);
-	// auto ppmdata = readBinaryFile("./resources/spot/spot_texture.ppm", 40, 1000000000000);
-	vector<uint32_t> colors(256 * 256, 0);
 
-	for(int i = 0; i < 256 * 256; i++){
-		uint32_t r = ppmdata->get<uint8_t>(3 * i + 0);
-		uint32_t g = ppmdata->get<uint8_t>(3 * i + 1);
-		uint32_t b = ppmdata->get<uint8_t>(3 * i + 2);
-		uint32_t color = r | (g << 8) | (b << 16);
+	vector<uint32_t> colors;
+	{
+		vector<uint8_t> image;
+		auto pngdata = readBinaryFile("./modules/rpg/resources/seasonal sample (summer).png");
+		uint32_t width;
+		uint32_t height;
+		lodepng::decode(
+			image, 
+			width, height, 
+			(const unsigned char*)pngdata->data_char, 
+			size_t(pngdata->size));
 
-		colors[i] = color;
+		uint32_t* u32data = (uint32_t*)image.data();
+		
+		assert(width * height == 256 * 256);
+		colors = vector<uint32_t>(u32data, u32data + 256 * 256);
 	}
 
 	initCudaProgram(renderer, model, colors, img_ascii_16);

@@ -127,7 +127,7 @@ struct Allocator{
 
 };
 
-int strlen(const char* text){
+inline int strlen(const char* text){
 	int MAX_STRLEN = 100;
 	int numchars = 0;
 

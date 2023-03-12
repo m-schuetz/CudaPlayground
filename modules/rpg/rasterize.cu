@@ -133,7 +133,7 @@ void drawMap(Map* map, uint64_t* framebuffer){
 		uint32_t maptile_local_x = (lpx / pixelScale) % tileset.tilesize;
 		uint32_t maptile_local_y = (lpy / pixelScale) % tileset.tilesize;
 
-		uint32_t target_x = lpx + 1200;
+		uint32_t target_x = lpx + 1300;
 		uint32_t target_y = lpy +  50;
 
 		uint32_t color = 0;
@@ -262,6 +262,35 @@ void kernel(
 		map.layer_0.data[index] = index;
 	});
 
+	grid.sync();
+
+	// grass:  224, 208, 192, 176, 160
+	// earth:  244, 228, 212, 196, 180
+
+	{
+		uint32_t row_9[13] = {160, 176, 224, 208, 192, 176, 160, 208, 192, 176, 160, 224, 224};
+		uint32_t row_8[13] = {208, 192, 241, 242, 242, 242, 242, 243, 224, 208, 192, 176, 224};
+		uint32_t row_7[13] = {224, 208, 225, 244, 228, 226, 226, 227, 224, 224, 208, 192, 176};
+		uint32_t row_6[13] = {192, 176, 225, 212, 196, 226, 226, 227, 208, 192, 176, 160, 224};
+		uint32_t row_5[13] = {224, 208, 225, 226, 244, 228, 226, 227, 224, 224, 208, 192, 176};
+		uint32_t row_4[13] = {192, 176, 225, 244, 228, 212, 228, 227, 208, 192, 176, 160, 224};
+		uint32_t row_3[13] = {224, 208, 225, 226, 244, 228, 212, 227, 224, 224, 208, 192, 176};
+		uint32_t row_2[13] = {192, 176, 225, 244, 228, 212, 226, 227, 208, 192, 176, 160, 224};
+		uint32_t row_1[13] = {224, 208, 209, 210, 210, 210, 210, 211, 224, 224, 208, 224, 224};
+		uint32_t row_0[13] = {224, 208, 192, 176, 160, 224, 224, 224, 208, 192, 176, 160, 224};
+
+		memcpy(&map.layer_0.data[117], row_9, 13 * sizeof(uint32_t));
+		memcpy(&map.layer_0.data[104], row_8, 13 * sizeof(uint32_t));
+		memcpy(&map.layer_0.data[ 91], row_7, 13 * sizeof(uint32_t));
+		memcpy(&map.layer_0.data[ 78], row_6, 13 * sizeof(uint32_t));
+		memcpy(&map.layer_0.data[ 65], row_5, 13 * sizeof(uint32_t));
+		memcpy(&map.layer_0.data[ 52], row_4, 13 * sizeof(uint32_t));
+		memcpy(&map.layer_0.data[ 39], row_3, 13 * sizeof(uint32_t));
+		memcpy(&map.layer_0.data[ 26], row_2, 13 * sizeof(uint32_t));
+		memcpy(&map.layer_0.data[ 13], row_1, 13 * sizeof(uint32_t));
+		memcpy(&map.layer_0.data[  0], row_0, 13 * sizeof(uint32_t));
+	}
+
 	// clear framebuffer
 	processRange(0, uniforms.width * uniforms.height, [&](int pixelIndex){
 		// framebuffer[pixelIndex] = 0x7f800000'00332211ull;
@@ -289,7 +318,14 @@ void kernel(
 
 		uint32_t color = texel;
 
-		x = x + 50;
+		if(tx % 16 == 0){
+			color = 0;
+		}
+		if(ty % 16 == 0){
+			color = 0;
+		}
+
+		x = x + 70;
 		y = y + 50;
 
 		uint64_t encoded = color;
@@ -316,9 +352,32 @@ void kernel(
 			text[2] = 0;
 		}
 
+		uint8_t text1d[4];
+		int val = 16 * i;
+		if(val < 10){
+			text1d[0] = ' ';
+			text1d[1] = ' ';
+			text1d[2] = val + '0';
+			text1d[3] = 0;
+		}else if(val < 100){
+			text1d[0] = ' ';
+			text1d[1] = (val / 10) + '0';
+			text1d[2] = (val % 10) + '0';
+			text1d[3] = 0;
+		}else{
+			text1d[0] = (val / 100) + '0';
+			text1d[1] = ((val / 10) % 10) + '0';
+			text1d[2] = (val % 10) + '0';
+			text1d[3] = 0;
+		}
+
 		float fontsize = 32.0f;
-		drawText((const char*)&text, 65 + i * fontsize * 2.0f, 1075, fontsize);
-		drawText((const char*)&text, 15, 1025 - i * fontsize * 2.0f, fontsize);
+		drawText((const char*)&text, 85 + i * fontsize * 2.0f, 1075, fontsize);
+		drawText((const char*)&text, 85 + i * fontsize * 2.0f, 5, fontsize);
+
+		drawText((const char*)&text, 2, 65 + i * fontsize * 2.0f, fontsize);
+		
+		drawText((const char*)&text1d, 1102, 65 + i * fontsize * 2.0f, fontsize);
 	}
 
 	grid.sync();
