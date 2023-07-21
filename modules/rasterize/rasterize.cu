@@ -21,6 +21,63 @@ float4 operator*(const mat4& a, const float4& b){
 	);
 }
 
+
+float3 sample(float u, float v, float level){
+	
+	float x = u;
+	float y = v;
+
+	float factor = pow(2.0f, level);
+	float offset = (fmodf(level, 2.0) == 0) ? 0.0 : 1.0;
+
+	u = factor * u;
+	v = factor * v;
+
+	float fu = fmodf(u, 1.0f) * 2.0 - 1.0;
+	float fv = fmodf(v, 1.0f) * 2.0 - 1.0;
+
+	float d = sqrt(fu * fu + fv * fv);
+
+	float c = 0.3;
+	float z = 0.3 * exp(-(d * d) / (2 * c * c)) / pow(2.0f, level);
+
+	return {x, y, z};
+};
+
+float3 sample_1(float u, float v, float level){
+
+	float epsilon = 0.001;
+	float3 p_0 = sample(u, v, level);
+	float3 tx_0 = sample(u + epsilon, v , level) - p_0;
+	float3 ty_0 = sample(u, v + epsilon, level) - p_0;
+	float3 N_0 = normalize(cross(tx_0, ty_0));
+
+	float3 off_1 = sample(u, v, 3.0);
+	float3 p_1 = p_0 + N_0 * off_1.z;
+
+	return p_1;
+}
+
+float3 sample_2(float u, float v, float level){
+
+	float epsilon = 0.001;
+	float3 p_0 = sample_1(u, v, 0.0);
+	float3 tx_0 = sample_1(u + epsilon, v , 0.0) - p_0;
+	float3 ty_0 = sample_1(u, v + epsilon, 0.0) - p_0;
+	float3 N_0 = normalize(cross(tx_0, ty_0));
+
+	float3 off_1 = sample(u, v, 4.0);
+	float3 p_1 = p_0 + N_0 * off_1.z;
+
+	return p_1;
+}
+
+float3 sample(float u, float v){
+	return sample_1(u, v, 0.0);
+
+	// return {u, v, 0.0};
+}
+
 extern "C" __global__
 void kernel(
 	const Uniforms _uniforms,
@@ -47,6 +104,8 @@ void kernel(
 
 	grid.sync();
 
+	
+
 	// draw plane
 	int cells = 2000;
 	processRange(0, cells * cells, [&](int index){
@@ -56,13 +115,22 @@ void kernel(
 		float u = float(ux) / float(cells - 1);
 		float v = float(uy) / float(cells - 1);
 
-		float4 pos = {
-			5.0 * (u - 0.5), 
-			5.0 * (v - 0.5), 
-			0.0f, 
-			1.0f};
+		// u = 2.0 * u - 1.0;
+		// v = 2.0 * v - 1.0;
 
-		float4 ndc = uniforms.transform * pos;
+		float3 pos = sample(u, v);
+
+		float3 tx = sample(u + 0.01, v + 0.00) - pos;
+		float3 ty = sample(u + 0.00, v + 0.01) - pos;
+
+		float3 N = normalize(cross(tx, ty));
+
+		float3 lightpos = {-10.0f, 10.0f, 10.0f};
+		float3 L = normalize(lightpos - pos);
+
+		float diffuse = dot(N, L);
+
+		float4 ndc = uniforms.transform * float4{pos.x, pos.y, pos.z, 1.0};
 		ndc.x = ndc.x / ndc.w;
 		ndc.y = ndc.y / ndc.w;
 		ndc.z = ndc.z / ndc.w;
@@ -74,6 +142,9 @@ void kernel(
 		uint32_t R = 255.0f * u;
 		uint32_t G = 255.0f * v;
 		uint32_t B = 0;
+		R = diffuse * 255.0 ;
+		G = diffuse * 255.0 ;
+		B = diffuse * 255.0 ;
 		uint64_t color = R | (G << 8) | (B << 16);
 
 		if(x > 1 && x < uniforms.width  - 2.0)
@@ -95,52 +166,6 @@ void kernel(
 
 			// 	atomicMin(&framebuffer[pixelID], encoded);
 			// }
-		}
-	});
-
-	// draw sphere
-	int s = 10'000;
-	float rounds = 20.0;
-	processRange(0, s, [&](int index){
-		float u = float(index) / float(s - 1);
-
-		float z = 2.0 * u - 1.0;
-		float a = cos(0.5 * PI * z);
-		a = sqrt(1.0f - abs(z * z));
-
-		float r = 0.5;
-
-		float4 pos = {
-			r * a * sin(rounds * PI * u), 
-			r * a * cos(rounds * PI * u), 
-			r * z + 0.3, 
-			1.0f};
-
-		float4 ndc = uniforms.transform * pos;
-		ndc.x = ndc.x / ndc.w;
-		ndc.y = ndc.y / ndc.w;
-		ndc.z = ndc.z / ndc.w;
-		float depth = ndc.w;
-
-		int x = (ndc.x * 0.5 + 0.5) * uniforms.width;
-		int y = (ndc.y * 0.5 + 0.5) * uniforms.height;
-
-		uint32_t R = 255.0f * u;
-		uint32_t G = 0;
-		uint32_t B = 0;
-		uint64_t color = R | (G << 8) | (B << 16);
-
-		if(x > 1 && x < uniforms.width  - 2.0)
-		if(y > 1 && y < uniforms.height - 2.0){
-
-			for(int ox : {-2, -1, 0, 1, 2})
-			for(int oy : {-2, -1, 0, 1, 2}){
-				uint32_t pixelID = (x + ox) + int(uniforms.width) * (y + oy);
-				uint64_t udepth = *((uint32_t*)&depth);
-				uint64_t encoded = (udepth << 32) | color;
-
-				atomicMin(&framebuffer[pixelID], encoded);
-			}
 		}
 	});
 

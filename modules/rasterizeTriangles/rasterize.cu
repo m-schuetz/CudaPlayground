@@ -428,7 +428,7 @@ void kernel(
 		
 		// 5x5 instances at specified offsets
 		for(float ox : {-3.0f, -1.5f, 0.0f, 1.5f, 3.0f})
-		for(float oy : {-3.0f, -1.5f, 0.0f, 1.5f, 3.0f})
+		for(float oy : {-3.0f, -1.5f, 0.0f, 1.5f, 3.0f, 5.0f, 7.0f})
 		{
 
 			// float s = 1.0 - length(float2{ox, oy}) / 6.0;
@@ -487,6 +487,8 @@ void kernel(
 		{
 			color = color / (maxNanos / 255);
 		}
+		if(x < 400)/*
+			*/color = 0x000000ff;
 
 
 		surf2Dwrite(color, gl_colorbuffer, x * 4, y);
