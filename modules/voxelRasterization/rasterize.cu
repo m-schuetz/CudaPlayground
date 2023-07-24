@@ -10,6 +10,11 @@
 // author: Alan Wolfe
 // (MIT LICENSE)
 
+struct Point{
+	float x, y, z;
+	uint32_t color;
+};
+
 float4 operator*(const mat4& a, const float4& b){
 	return make_float4(
 		dot(a.rows[0], b),
@@ -54,24 +59,42 @@ uint64_t nanotime_start;
 
 constexpr float PI = 3.1415;
 constexpr uint32_t BACKGROUND_COLOR = 0x00332211ull;
+constexpr uint64_t DEFAULT_FRAGMENT = (uint64_t(Infinity) << 32ull) | uint64_t(BACKGROUND_COLOR);
 
-float intersect_sphere(float3 origin, float3 direction, float3 spherePos, float sphereRadius) {
+// float intersect_sphere(float3 origin, float3 direction, float3 spherePos, float sphereRadius) {
 
-	float3 CO = origin - spherePos;
-	float a = dot(direction, direction);
-	float b = 2.0f * dot(direction, CO);
-	float c = dot(CO, CO) - sphereRadius * sphereRadius;
-	float delta = b * b - 4.0f * a * c;
+// 	float3 CO = origin - spherePos;
+// 	float a = dot(direction, direction);
+// 	float b = 2.0f * dot(direction, CO);
+// 	float c = dot(CO, CO) - sphereRadius * sphereRadius;
+// 	float delta = b * b - 4.0f * a * c;
 	
-	if(delta < 0.0) {
+// 	if(delta < 0.0) {
+// 		return -1.0;
+// 	}
+
+// 	float t = (-b - sqrt(delta)) / (2.0f * a);
+
+// 	return t;
+// }
+
+float intersect_sphere(float3 ro, float3 rd, float3 ce, float ra) {
+
+	float3 oc = ro - ce;
+	float b = dot( oc, rd );
+	float c = dot( oc, oc ) - ra*ra;
+	float h = b * b - c;
+
+	if(h < 0.0 ){
+		// no intersection
 		return -1.0;
-	}
+	} 
 
-	float t = (-b - sqrt(delta)) / (2.0f * a);
+	h = sqrt(h);
 
-	// return true;
+	return min(-b - h, -b + h);
 
-	return t;
+	// return vec2(-b - h, -b + h);
 }
 
 extern "C" __global__
@@ -96,6 +119,36 @@ void kernel(
 	uint64_t* framebuffer = allocator->alloc<uint64_t*>(framebufferSize);
 	uint64_t* framebuffer_2 = allocator->alloc<uint64_t*>(framebufferSize);
 
+	uint32_t numPoints = 1'000'000;
+	Point* points = allocator->alloc<Point*>(16 * numPoints);
+
+	curandStateXORWOW_t thread_random_state;
+	curand_init(grid.thread_rank(), 0, 0, &thread_random_state);
+
+
+
+	processRange(numPoints, [&](int index){
+
+		uint32_t X = curand(&thread_random_state);
+		uint32_t Y = curand(&thread_random_state);
+		uint32_t Z = curand(&thread_random_state);
+
+		float x = float(X % 2'000'000) - 1'000'000.0;
+		float y = float(Y % 2'000'000) - 1'000'000.0;
+		float z = float(Z % 2'000'000) - 1'000'000.0;
+
+		float3 spherePos = float3{x, y, z};
+		spherePos = normalize(spherePos);
+
+		float scale = 20.1;
+		float3 pos = {40.0, 30.0, 100.0};
+
+		points[index].x = scale * spherePos.x + pos.x;
+		points[index].y = scale * spherePos.y + pos.y;
+		points[index].z = scale * spherePos.z + pos.z;
+		points[index].color = 0x000000ff;
+	});
+
 	// clear framebuffer
 	processRange(0, uniforms.width * uniforms.height, [&](int pixelIndex){
 		// framebuffer[pixelIndex] = 0x7f800000'00332211ull;
@@ -105,10 +158,53 @@ void kernel(
 
 	grid.sync();
 
+	// PROJECT POINTS TO PIXELS
+	if(false)
+	processRange(numPoints, [&](int index){
+
+		Point point = points[index];
+		mat4 transform = uniforms.proj * uniforms.view;
+
+		float4 ndc = transform * float4{point.x, point.y, point.z, 1.0f};
+		ndc.x = ndc.x / ndc.w;
+		ndc.y = ndc.y / ndc.w;
+		ndc.z = ndc.z / ndc.w;
+
+		if(ndc.w <= 0.0) return;
+		if(ndc.x < -1.0) return;
+		if(ndc.x >  1.0) return;
+		if(ndc.y < -1.0) return;
+		if(ndc.y >  1.0) return;
+
+		float2 imgPos = {
+			(ndc.x * 0.5f + 0.5f) * uniforms.width, 
+			(ndc.y * 0.5f + 0.5f) * uniforms.height,
+		};
+
+		uint32_t color = point.color;
+		uint8_t* rgba = (uint8_t*)&color;
+
+		float depth = ndc.w;
+		uint64_t udepth = *((uint32_t*)&depth);
+
+		uint64_t pixel = (udepth << 32ull) | index;
+		// uint64_t pixel = (udepth << 32ull) | color;
+
+
+		int2 pixelCoords = make_int2(imgPos.x, imgPos.y);
+		int pixelID = pixelCoords.x + pixelCoords.y * uniforms.width;
+		pixelID = clamp(pixelID, 0, int(uniforms.width * uniforms.height) - 1);
+
+		atomicMin(&framebuffer[pixelID], pixel);
+
+
+	});
+
+	grid.sync();
+
 	// PROJECT VOXELS TO PIXELS
 	uint8_t* voxelBuffer_u8 = (uint8_t*)voxelBuffer;
 	processRange(uniforms.numVoxels, [&](int index){
-
 
 		int X = voxelBuffer_u8[6 * index + 0];
 		int Y = voxelBuffer_u8[6 * index + 1];
@@ -128,6 +224,12 @@ void kernel(
 		ndc.y = ndc.y / ndc.w;
 		ndc.z = ndc.z / ndc.w;
 
+		if(ndc.w <= 0.0) return;
+		if(ndc.x < -1.0) return;
+		if(ndc.x >  1.0) return;
+		if(ndc.y < -1.0) return;
+		if(ndc.y >  1.0) return;
+
 		float2 imgPos = {
 			(ndc.x * 0.5f + 0.5f) * uniforms.width, 
 			(ndc.y * 0.5f + 0.5f) * uniforms.height,
@@ -142,7 +244,9 @@ void kernel(
 
 		float depth = ndc.w;
 		uint64_t udepth = *((uint32_t*)&depth);
-		uint64_t pixel = (udepth << 32ull) | color;
+
+		uint64_t pixel = (udepth << 32ull) | index;
+		// uint64_t pixel = (udepth << 32ull) | color;
 
 
 		int2 pixelCoords = make_int2(imgPos.x, imgPos.y);
@@ -156,7 +260,7 @@ void kernel(
 
 	grid.sync();
 
-	int window = 0;
+	int window = 1;
 
 	// WIDEN HORIZONTALY
 	int numPixels = uniforms.width * uniforms.height;
@@ -211,63 +315,169 @@ void kernel(
 	processRange(uniforms.width * uniforms.height, [&](int pixelIndex){
 
 		int x = pixelIndex % int(uniforms.width);
+		int y = pixelIndex / int(uniforms.width);
+		int pixelID = x + uniforms.width * y;
+
+		framebuffer_2[pixelID] = framebuffer[pixelID];
+		// framebuffer[pixelID] = closestFragment;
+	});
+
+	grid.sync();
+
+	if(false)
+	processRange(uniforms.width * uniforms.height, [&](int pixelIndex){
+
+		int numPixels = uniforms.width * uniforms.height;
+		int x = pixelIndex % int(uniforms.width);
+		int y = uniforms.height - (pixelIndex / int(uniforms.width));
+		float aspectRatio = uniforms.width / uniforms.height;
+
+		float closestT = Infinity;
+		bool nonePicked = true;
+		uint32_t pickedVoxel = -1;
+		uint32_t pickedColor = 0;
+
+		int window = 3;
+		for(int dx = -window; dx <= window; dx++)
+		for(int dy = -window; dy <= window; dy++)
+		{
+			int pixelID = (x + dx) + uniforms.width * (y + dy);
+
+			if(pixelID >= numPixels) continue;
+
+			uint64_t neighbor = framebuffer[pixelID];
+			uint32_t udepth = (neighbor >> 32);
+			uint32_t neighborIndex = neighbor & 0xffffffff;
+
+			if(neighbor == DEFAULT_FRAGMENT) continue;
+			if(neighborIndex >= uniforms.numVoxels) continue;
+
+			int X = voxelBuffer_u8[6 * neighborIndex + 0];
+			int Y = voxelBuffer_u8[6 * neighborIndex + 1];
+			int Z = voxelBuffer_u8[6 * neighborIndex + 2];
+			int r = voxelBuffer_u8[6 * neighborIndex + 3];
+			int g = voxelBuffer_u8[6 * neighborIndex + 4];
+			int b = voxelBuffer_u8[6 * neighborIndex + 5];
+
+			float u = float(x + dx) / uniforms.width;
+			float v = float(y + dy) / uniforms.height;
+
+			float3 rayPosition = {0.0, 0.0, 0.0};
+
+			float4 rayPos4 = uniforms.viewInverse * float4{0.0, 0.0, 0.0, 1.0};
+			rayPosition.x = rayPos4.x;
+			rayPosition.y = rayPos4.y;
+			rayPosition.z = rayPos4.z;
+
+			float4 rayTarget4 = uniforms.viewInverse * float4{
+				2.0f * u - 1.0f, 
+				(2.0f * v - 1.0f) / aspectRatio, 
+				-1.0f, 
+				1.0f,
+			};
+
+			float3 rayTarget = make_float3(rayTarget4);
+
+			float3 spherePos = {
+				float(X), 
+				float(Y), 
+				float(Z),
+			};
+			float sphereRadius = 0.001f;
+
+			float3 rayDir = normalize(rayTarget - rayPosition);
+			float t = intersect_sphere(rayPosition, rayDir, spherePos, sphereRadius);
+
+				nonePicked = false;
+				pickedVoxel = neighborIndex;
+				pickedColor = r | (g << 8) | (b << 16);
+
+			if(t > 0.0){
+				closestT = min(closestT, t);
+
+				pickedColor = 0x0000ff00;
+			}
+
+			// if(t > 0.0f){
+			// 	uint32_t color = 0x0000ff00;
+
+			// 	uint64_t fragment = (uint64_t(Infinity) << 32ull) | uint64_t(color);
+			// 	framebuffer_2[pixelID] = fragment;
+			// }else{
+			// 	uint32_t color = 0x000000ff;
+			// 	uint8_t* rgba = (uint8_t*)&color;
+
+			// 	// rgba[0] = r;
+			// 	// rgba[1] = g;
+			// 	// rgba[2] = b;
+
+			// 	// color = neighborIndex * 123;
+
+			// 	uint64_t fragment = (uint64_t(Infinity) << 32ull) | uint64_t(color);
+			// 	framebuffer_2[pixelID] = fragment;
+			// }
+
+		}
+
+		int targetpixelID = x + uniforms.width * y;
+
+		if(!nonePicked)
+		{
+			uint32_t color = 0x000000ff;
+			uint8_t* rgba = (uint8_t*)&color;
+			// rgba[0] = 255.0 * u;
+			// rgba[1] = 255.0 * v;
+
+			color = pickedColor;
+
+			uint64_t udepth = *((uint32_t*)&closestT);
+			uint64_t fragment = (uint64_t(Infinity) << 32ull) | uint64_t(color);
+			framebuffer_2[targetpixelID] = fragment;
+		}
+	});
+
+	grid.sync();
+
+	// Ray-Cast a sphere
+	// if(false)
+	processRange(uniforms.width * uniforms.height, [&](int pixelIndex){
+
+		float aspectRatio = uniforms.width / uniforms.height;
+
+		int x = pixelIndex % int(uniforms.width);
 		int y = uniforms.height - (pixelIndex / int(uniforms.width));
 		int pixelID = x + uniforms.width * y;
 
 		float u = float(x) / uniforms.width;
 		float v = float(y) / uniforms.height;
 
-		float aspectRatio = uniforms.width / uniforms.height;
-
-		float3 rayPosition = {0.0, 0.0, 0.0};
-		float3 rayTarget = {
-			2.0f * u - 1.0f, 
-			1.0f,
-			2.0f * v - 1.0f, 
-		};
-		// rayTarget.y /= aspectRatio;
-
 		float4 rayPos4 = uniforms.viewInverse * float4{0.0, 0.0, 0.0, 1.0};
-		rayPosition.x = rayPos4.x;
-		rayPosition.y = rayPos4.y;
-		rayPosition.z = rayPos4.z;
+		float3 rayPosition = make_float3(rayPos4);
 
 		float4 rayTarget4 = uniforms.viewInverse * float4{
 			2.0f * u - 1.0f, 
-			1.0f, 
 			(2.0f * v - 1.0f) / aspectRatio, 
+			-1.0f, 
 			1.0f};
-		rayTarget.x = rayTarget4.x;
-		rayTarget.y = rayTarget4.y;
-		rayTarget.z = rayTarget4.z;
+		float3 rayTarget = make_float3(rayTarget4);
 
+		float4 cameraDir4 = uniforms.viewInverse * float4{0.0, 0.0, -1.0f, 1.0f};
+		float3 cameraDir = normalize(make_float3(cameraDir4));
+		// rayTarget = normalize(rayTarget);
 
-		// float4 rayWorldPos = uniforms.view * rayPosition;
-
-		float3 spherePos = {0.0, 0.0, 0.0};
-		float sphereRadius = 0.1f;
-
-		float4 spherePosView = uniforms.view * float4{spherePos.x, spherePos.y, spherePos.z, 1.0};
-		// spherePos.x = spherePosView.x;
-		// spherePos.y = spherePosView.y;
-		// spherePos.z = spherePosView.z;
+		// int X = voxelBuffer_u8[20 * 6 + 0];
+		// int Y = voxelBuffer_u8[20 * 6 + 1];
+		// int Z = voxelBuffer_u8[20 * 6 + 2];
+		// int r = voxelBuffer_u8[20 * 6 + 3];
+		// int g = voxelBuffer_u8[20 * 6 + 4];
+		// int b = voxelBuffer_u8[20 * 6 + 5];
+		// float3 spherePos = {float(X), float(Y), float(Z)};
+		
+		float sphereRadius = 20.1f;
+		float3 spherePos = {40.0, 30.0, 100.0};
 
 		float3 rayDir = normalize(rayTarget - rayPosition);
-		// rayDir.x *= 1.0;
-		// rayDir.y *= 1.0;
-		// rayDir.z *= 1.0;
-
-		if(x == 1 && y == 500){
-			// printf("rayPosition: %f, %f, %f \n", rayPosition.x, rayPosition.y, rayPosition.z);
-			// printf("rayTarget: %f, %f, %f \n", rayTarget.x, rayTarget.y, rayTarget.z);
-			printf("rayDir: %f, %f, %f \n", rayDir.x, rayDir.y, rayDir.z);
-			// printf("spherePos: %f, %f, %f \n", spherePos.x, spherePos.y, spherePos.z);
-		}
-
-
-
 		float t = intersect_sphere(rayPosition, rayDir, spherePos, sphereRadius);
-
 
 		uint32_t color;
 		uint8_t* rgba = (uint8_t*)&color;
@@ -276,25 +486,44 @@ void kernel(
 		rgba[1] = 255.0 * rayTarget.y;
 		rgba[2] = 255.0 * rayTarget.z;
 
-		// rgba[0] = 255.0 * u;
-		// rgba[1] = 255.0 * v;
-		// rgba[2] = 0.0;
+		if(t > 0.0f){
+			color = 0x0000ff00;
 
-		// if(t > 0.0f){
-		// 	color = 0x0000ff00;
+			float3 I = rayPosition + t * rayDir;
 
-		// 	uint64_t fragment = (uint64_t(Infinity) << 32ull) | uint64_t(color);
-		// 	framebuffer[pixelID] = fragment;
-		// }else{
-		// 	color = 0x000000ff;
-		// }
+			mat4 transform = uniforms.proj * uniforms.view;
 
-		uint64_t fragment = (uint64_t(Infinity) << 32ull) | uint64_t(color);
-		framebuffer[pixelID] = fragment;
+			float4 ndc = transform * float4{I.x, I.y, I.z, 1.0f};
+			ndc.x = ndc.x / ndc.w;
+			ndc.y = ndc.y / ndc.w;
+			ndc.z = ndc.z / ndc.w;
 
-			// color = 0x000000ff;
+			float2 imgPos = {
+				(ndc.x * 0.5f + 0.5f) * uniforms.width, 
+				(ndc.y * 0.5f + 0.5f) * uniforms.height,
+			};
 
-		
+			float depth = ndc.w;
+			uint64_t udepth = *((uint32_t*)&depth);
+
+			uint64_t pixel = (udepth << 32ull) | 0x0000ff00;
+
+			int2 pixelCoords = make_int2(imgPos.x, imgPos.y);
+			int pixelID = pixelCoords.x + pixelCoords.y * uniforms.width;
+			pixelID = clamp(pixelID, 0, int(uniforms.width * uniforms.height) - 1);
+
+			atomicMin(&framebuffer_2[pixelID], pixel);
+
+			// rgba[0] = r;
+			// rgba[1] = g;
+			// rgba[2] = b;
+
+			// t = 0.10;
+			// uint64_t udepth = *((uint32_t*)&ndc.w);
+
+			// uint64_t fragment = (udepth << 32ull) | uint64_t(color);
+			// atomicMin(&framebuffer_2[pixelID], fragment);
+		}
 	});
 
 	grid.sync();
@@ -305,8 +534,17 @@ void kernel(
 		int x = pixelIndex % int(uniforms.width);
 		int y = pixelIndex / int(uniforms.width);
 
-		uint64_t encoded = framebuffer[pixelIndex];
-		uint32_t color = encoded & 0xffffffffull;
+		struct Fragment{
+			uint32_t color;
+			float depth;
+		};
+
+		Fragment fragment = ((Fragment*)framebuffer_2)[pixelIndex];
+
+		uint64_t encoded = framebuffer_2[pixelIndex];
+		// uint32_t color = encoded & 0xffffffffull;
+		uint32_t color = fragment.color;
+		// color = fragment.depth * 0.5;
 
 		surf2Dwrite(color, gl_colorbuffer, x * 4, y);
 	});

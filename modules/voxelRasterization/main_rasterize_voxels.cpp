@@ -21,6 +21,8 @@
 #include "HostDeviceInterface.h"
 
 using namespace std;
+using glm::mat4;
+using glm::transpose;
 
 CUdeviceptr cptr_buffer, cptr_voxelBuffer;
 
@@ -81,21 +83,25 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 	uniforms.time = now();
 	uniforms.numVoxels = model->size / 6;
 
-	glm::mat4 rotX = glm::rotate(glm::mat4(), 3.1415f * 0.5f, glm::vec3(1.0, 0.0, 0.0));
+	mat4 rotX = glm::rotate(glm::mat4(), 3.1415f * 0.5f, glm::vec3(1.0, 0.0, 0.0));
 
-	glm::mat4 world = rotX;
-	glm::mat4 view = renderer->camera->view;
-	glm::mat4 proj = renderer->camera->proj;
-	glm::mat4 worldViewProj = proj * view * world;
-	world = glm::transpose(world);
-	view = glm::transpose(view);
-	glm::mat4 viewInverse = glm::inverse(view);
-	proj = glm::transpose(proj);
-	worldViewProj = glm::transpose(worldViewProj);
+	mat4 world          = rotX;
+	mat4 view           = renderer->camera->view;
+	mat4 viewInverse    = inverse(view);
+	mat4 camWorld       = renderer->camera->world;
+	mat4 proj           = renderer->camera->proj;
+	mat4 worldViewProj  = proj * view * world;
+	world               = transpose(world);
+	view                = transpose(view);
+	viewInverse         = transpose(viewInverse);
+	camWorld            = transpose(camWorld);
+	proj                = transpose(proj);
+	worldViewProj       = transpose(worldViewProj);
 
 	memcpy(&uniforms.world, &world, sizeof(world));
 	memcpy(&uniforms.view, &view, sizeof(view));
 	memcpy(&uniforms.viewInverse, &viewInverse, sizeof(viewInverse));
+	memcpy(&uniforms.camWorld, &camWorld, sizeof(camWorld));
 	memcpy(&uniforms.proj, &proj, sizeof(proj));
 	memcpy(&uniforms.transform, &worldViewProj, sizeof(worldViewProj));
 
