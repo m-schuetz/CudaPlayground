@@ -103,6 +103,7 @@ struct Uniforms{
 	mat4 viewInverse;
 	mat4 camWorld;
 	mat4 proj;
+	mat4 projInverse;
 	mat4 transform;
 	int colorMode;
 	int sampleMode;

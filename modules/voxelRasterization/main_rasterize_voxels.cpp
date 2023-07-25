@@ -90,12 +90,14 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 	mat4 viewInverse    = inverse(view);
 	mat4 camWorld       = renderer->camera->world;
 	mat4 proj           = renderer->camera->proj;
+	mat4 projInverse    = inverse(renderer->camera->proj);
 	mat4 worldViewProj  = proj * view * world;
 	world               = transpose(world);
 	view                = transpose(view);
 	viewInverse         = transpose(viewInverse);
 	camWorld            = transpose(camWorld);
 	proj                = transpose(proj);
+	projInverse         = transpose(projInverse);
 	worldViewProj       = transpose(worldViewProj);
 
 	memcpy(&uniforms.world, &world, sizeof(world));
@@ -103,6 +105,7 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 	memcpy(&uniforms.viewInverse, &viewInverse, sizeof(viewInverse));
 	memcpy(&uniforms.camWorld, &camWorld, sizeof(camWorld));
 	memcpy(&uniforms.proj, &proj, sizeof(proj));
+	memcpy(&uniforms.projInverse, &projInverse, sizeof(projInverse));
 	memcpy(&uniforms.transform, &worldViewProj, sizeof(worldViewProj));
 
 	float values[16];
@@ -182,6 +185,12 @@ int main(){
 	renderer->controls->pitch  = 0.0;
 	renderer->controls->radius = 5;
 	renderer->controls->target = {0.0, 0.0, 0.0};
+
+	renderer->controls->yaw    = 0.918;
+	renderer->controls->pitch  = -0.313;
+	renderer->controls->radius = 127.738;
+	renderer->controls->target = { 15.477, 52.109, 81.203, };
+
 
 
 	initCuda();
