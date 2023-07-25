@@ -42,11 +42,22 @@ void initCuda(){
 
 void renderCUDA(shared_ptr<GLRenderer> renderer){
 
-	cuGraphicsGLRegisterImage(
-		&cugl_colorbuffer, 
-		renderer->view.framebuffer->colorAttachments[0]->handle, 
-		GL_TEXTURE_2D, 
-		CU_GRAPHICS_REGISTER_FLAGS_WRITE_DISCARD);
+	// cuGraphicsGLRegisterImage(
+	// 	&cugl_colorbuffer, 
+	// 	renderer->view.framebuffer->colorAttachments[0]->handle, 
+	// 	GL_TEXTURE_2D, 
+	// 	CU_GRAPHICS_REGISTER_FLAGS_WRITE_DISCARD);
+
+	static bool registered = false;
+	if(!registered){
+		cuGraphicsGLRegisterImage(
+			&cugl_colorbuffer, 
+			renderer->view.framebuffer->colorAttachments[0]->handle, 
+			GL_TEXTURE_2D, 
+			CU_GRAPHICS_REGISTER_FLAGS_WRITE_DISCARD);
+
+		registered = true;
+	}
 
 	CUresult resultcode = CUDA_SUCCESS;
 
@@ -55,7 +66,7 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 	cuCtxGetDevice(&device);
 	cuDeviceGetAttribute(&numSMs, CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, device);
 
-	int workgroupSize = 128;
+	int workgroupSize = 256;
 
 	int numGroups;
 	resultcode = cuOccupancyMaxActiveBlocksPerMultiprocessor(&numGroups, cuda_program->kernels["kernel"], workgroupSize, 0);
@@ -138,18 +149,18 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 	// 	cout << std::format("total:     {:6.1f} ms", total_ms) << endl;
 	// }
 
-	cuCtxSynchronize();
+	// cuCtxSynchronize();
 
 	cuSurfObjectDestroy(output_surf);
 	cuGraphicsUnmapResources(dynamic_resources.size(), dynamic_resources.data(), ((CUstream)CU_STREAM_DEFAULT));
-	cuGraphicsUnregisterResource(cugl_colorbuffer);
+	// cuGraphicsUnregisterResource(cugl_colorbuffer);
 
 
 }
 
 void initCudaProgram(shared_ptr<GLRenderer> renderer, shared_ptr<Buffer> model){
 
-	cuMemAlloc(&cptr_buffer, 100'000'000);
+	cuMemAlloc(&cptr_buffer, 200'000'000);
 	cuMemAlloc(&cptr_voxelBuffer, 10'000'000);
 
 	cuMemcpyHtoD(cptr_voxelBuffer, model->data, model->size);

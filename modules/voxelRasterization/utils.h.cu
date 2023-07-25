@@ -61,6 +61,43 @@ void processRange(int size, Function&& f){
 	}
 }
 
+template<typename Function>
+void processTiles(int tiles_x, int tiles_y, const int tileSize, uint32_t& tileCounter, Function&& f){
+
+	auto grid = cg::this_grid();
+	auto block = cg::this_thread_block();
+
+	int numTiles = tiles_x * tiles_y;
+
+	if(grid.thread_rank() == 0){
+		tileCounter = 0;
+	}
+
+	grid.sync();
+
+	__shared__ uint32_t sh_tileID;
+	while(true){
+
+		int t_tileID = 0;
+		if(block.thread_rank() == 0){
+			t_tileID = atomicAdd(&tileCounter, 1);
+		}
+		sh_tileID = t_tileID;
+
+		block.sync();
+
+		if(sh_tileID >= numTiles) break;
+
+		int tileX = sh_tileID % tiles_x;
+		int tileY = sh_tileID / tiles_x;
+
+		f(tileX, tileY);
+
+		block.sync();
+	}
+
+}
+
 void printNumber(int64_t number, int leftPad = 0);
 
 struct Allocator{
