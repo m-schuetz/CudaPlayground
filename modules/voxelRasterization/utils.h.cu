@@ -165,3 +165,11 @@ struct Allocator{
 	}
 
 };
+
+inline uint64_t nanotime(){
+
+	uint64_t nanotime;
+	asm volatile("mov.u64 %0, %%globaltimer;" : "=l"(nanotime));
+
+	return nanotime;
+}

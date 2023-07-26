@@ -70,6 +70,104 @@ constexpr float PI = 3.1415;
 constexpr uint32_t BACKGROUND_COLOR = 0x00332211ull;
 constexpr uint64_t DEFAULT_FRAGMENT = (uint64_t(Infinity) << 32ull) | uint64_t(BACKGROUND_COLOR);
 
+// see https://www.cs.princeton.edu/courses/archive/fall00/cs426/lectures/raycast/sld017.htm
+float intersect_plane(float3 origin, float3 direction, float3 N, float d) {
+	float t = -(dot(origin, N) + d) / dot(direction, N);
+
+	return t;
+}
+
+float intersect_cube(float3 origin, float3 direction, float3 pos, float size){
+
+	auto grid = cg::this_grid();
+
+	float t0 = intersect_plane(origin, direction, { 1.0f,  0.0f,  0.0f}, -pos.x + 0.5f * size);
+	float t1 = intersect_plane(origin, direction, { 1.0f,  0.0f,  0.0f}, -pos.x - 0.5f * size);
+	float t2 = intersect_plane(origin, direction, { 0.0f,  1.0f,  0.0f}, -pos.y + 0.5f * size);
+	float t3 = intersect_plane(origin, direction, { 0.0f,  1.0f,  0.0f}, -pos.y - 0.5f * size);
+	float t4 = intersect_plane(origin, direction, { 0.0f,  0.0f,  1.0f}, -pos.z + 0.5f * size);
+	float t5 = intersect_plane(origin, direction, { 0.0f,  0.0f,  1.0f}, -pos.z - 0.5f * size);
+
+	float t01 = min(t0, t1);
+	float t23 = min(t2, t3);
+	float t45 = min(t4, t5);
+
+	float txf, txb;
+	float tyf, tyb;
+	float tzf, tzb;
+
+	if(direction.x < 0.0){
+		txf = t1;
+		txb = t0;
+	}else{
+		txf = t0;
+		txb = t1;
+	}
+
+	if(direction.y < 0.0){
+		tyf = t3;
+		tzb = t2;
+	}else{
+		tyf = t2;
+		tyb = t3;
+	}
+
+	if(direction.z < 0.0){
+		tzf = t5;
+		tzb = t4;
+	}else{
+		tzf = t4;
+		tzb = t5;
+	}
+
+	float t = max(max(txf, tyf), tzf);
+
+	float epsilon = 0.0001f;
+
+	float3 I = origin + t * direction;
+
+	if(I.x < pos.x - 0.5f * size - epsilon) t = 0.0;
+	if(I.x > pos.x + 0.5f * size + epsilon) t = 0.0;
+	if(I.y < pos.y - 0.5f * size - epsilon) t = 0.0;
+	if(I.y > pos.y + 0.5f * size + epsilon) t = 0.0;
+	if(I.z < pos.z - 0.5f * size - epsilon) t = 0.0;
+	if(I.z > pos.z + 0.5f * size + epsilon) t = 0.0;
+
+
+	return t;
+}
+
+// float intersect_cube(float3 origin, float3 direction, float3 pos, float size){
+
+// 	float t0 = intersect_plane(origin, direction, { 1.0f,  0.0f,  0.0f}, 0.5f * size);
+// 	float t1 = intersect_plane(origin, direction, {-1.0f,  0.0f,  0.0f}, 0.5f * size);
+// 	float t2 = intersect_plane(origin, direction, { 0.0f,  1.0f,  0.0f}, 0.5f * size);
+// 	float t3 = intersect_plane(origin, direction, { 0.0f, -1.0f,  0.0f}, 0.5f * size);
+// 	float t4 = intersect_plane(origin, direction, { 0.0f,  0.0f,  1.0f}, 0.5f * size);
+// 	float t5 = intersect_plane(origin, direction, { 0.0f,  0.0f, -1.0f}, 0.5f * size);
+
+	
+// 	float t01 = min(t0, t1);
+// 	float t23 = min(t2, t3);
+// 	float t45 = min(t4, t5);
+
+// 	float t = min(min(t01, t23), min(t4, t5));
+
+// 	float3 I = origin + t * direction;
+
+// 	// float epsilon = 0.0001f;
+// 	// bool insideX = (I.x + epsilon >= pos.x - 0.5f * size) && (I.x - epsilon <= pos.x + 0.5f * size);
+// 	// bool insideY = (I.y + epsilon >= pos.y - 0.5f * size) && (I.y - epsilon <= pos.y + 0.5f * size);
+// 	// bool insideZ = (I.z + epsilon >= pos.z - 0.5f * size) && (I.z - epsilon <= pos.z + 0.5f * size);
+
+// 	// if(!insideX) t = 0.0;
+// 	// if(!insideY) t = 0.0;
+// 	// if(!insideZ) t = 0.0;
+
+
+// 	return t;
+// }
+
 float intersect_sphere(float3 origin, float3 direction, float3 spherePos, float sphereRadius) {
 
 	float3 CO = origin - spherePos;
@@ -517,6 +615,11 @@ void kernel(
 
 	grid.sync();
 
+	uint64_t t_resolve_tiles_start;
+	if(grid.thread_rank() == 0){
+		t_resolve_tiles_start = nanotime();
+	}
+
 	uint32_t TILE_SIZE = 16;
 	uint32_t tiles_x = (uniforms.width + TILE_SIZE - 1) / TILE_SIZE;
 	uint32_t tiles_y = (uniforms.height + TILE_SIZE - 1) / TILE_SIZE;
@@ -642,7 +745,8 @@ void kernel(
 			float3 spherePos = {voxel.x, voxel.y, voxel.z};
 			float sphereRadius = 0.5f;
 
-			float t = intersect_sphere(rayOrigin, rayDir, spherePos, sphereRadius);
+			float t = intersect_cube(rayOrigin, rayDir, {voxel.x, voxel.y, voxel.z}, 1.0f);
+			// float t = intersect_sphere(rayOrigin, rayDir, spherePos, sphereRadius);
 			float z = dot(t * rayDir, cameraDir);
 
 			if(t > 0.0){
@@ -658,6 +762,14 @@ void kernel(
 	});
 
 	grid.sync();
+
+	if(grid.thread_rank() == 0){
+		uint64_t micros = (nanotime() - t_resolve_tiles_start) / 1000;
+	
+		float millies = float(micros) / 1000.0f;
+
+		printf("duration: %.1f ms \n", millies);
+	}
 
 	// Ray-Cast a sphere, method 2
 	// float4 rayPos4     = uniforms.viewInverse * float4{0.0, 0.0, 0.0, 1.0};
@@ -703,6 +815,57 @@ void kernel(
 
 	// 		uint64_t udepth = *((uint32_t*)&depth);
 	// 		uint64_t pixel = (udepth << 32ull) | 0x0000ffff;
+
+	// 		atomicMin(&framebuffer_2[pixelID], pixel);
+	// 	}
+	// });
+
+	grid.sync();
+
+	// // Ray-Cast
+	// float sphereRadius = 20.5f;
+	// float3 spherePos = {40.0, 30.0, 115.0};
+	// float3 normal = {0.0, 0.0, 1.0};
+	// float pd = 10.0f;
+
+	// processRange(uniforms.width * uniforms.height, [&](int pixelID){
+
+	// 	// compute ray from pixel coordinates
+	// 	int x = pixelID % int(uniforms.width);
+	// 	int y = (pixelID / int(uniforms.width));
+
+	// 	float4 ndc = {
+	// 		2.0f * float(x + 0.5f) / uniforms.width - 1.0f,
+	// 		2.0f * float(y + 0.5f) / uniforms.height - 1.0f,
+	// 		0.0f, 1.0f
+	// 	};
+
+	// 	float4 pixelViewDir = uniforms.projInverse * ndc;
+	// 	pixelViewDir = pixelViewDir / pixelViewDir.w;
+	// 	float4 pixelWorldDir = uniforms.viewInverse * pixelViewDir;
+	// 	float3 rayTarget = make_float3(pixelWorldDir);
+	// 	float3 rayDir = normalize(rayTarget - rayOrigin);
+
+	// 	// float t = intersect_plane(rayOrigin, rayDir, normal, pd);
+	// 	float t = intersect_cube(rayOrigin, rayDir, {0.0, 0.0, 50.0}, 40.0);
+
+	// 	uint32_t color;
+	// 	uint8_t* rgba = (uint8_t*)&color;
+
+	// 	if(t > 0.0f){
+	// 		color = 0x0000ff00;
+	// 		color = t;
+
+	// 		// t is actual distance to intersection.
+	// 		// However, because the rasterized scene uses distance on central view-dir "z",
+	// 		// we need to transform t to "z" by projecting t * rayDir onto cameraDir.
+
+	// 		// float depth = t;
+	// 		float z = dot(t * rayDir, cameraDir);
+	// 		float depth = z;
+
+	// 		uint64_t udepth = *((uint32_t*)&depth);
+	// 		uint64_t pixel = (udepth << 32ull) | color;
 
 	// 		atomicMin(&framebuffer_2[pixelID], pixel);
 	// 	}
