@@ -35,6 +35,7 @@
       <Filter>stuff</Filter>
     </ClCompile>
     <ClCompile Include="..\modules\voxelRasterization\main_rasterize_voxels.cpp" />
+    <ClCompile Include="..\modules\pointRasterization\main_rasterize_points.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\libs\imgui\imgui.h">

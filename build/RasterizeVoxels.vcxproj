@@ -154,6 +154,7 @@
     <ClCompile Include="..\libs\imgui\imgui_widgets.cpp" />
     <ClCompile Include="..\libs\implot\implot.cpp" />
     <ClCompile Include="..\libs\implot\implot_items.cpp" />
+    <ClCompile Include="..\modules\pointRasterization\main_rasterize_points.cpp" />
     <ClCompile Include="..\modules\voxelRasterization\main_rasterize_voxels.cpp" />
     <ClCompile Include="..\src\GLRenderer.cpp" />
   </ItemGroup>
