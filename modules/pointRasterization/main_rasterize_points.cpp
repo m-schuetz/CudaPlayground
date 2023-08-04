@@ -63,6 +63,7 @@ CUdeviceptr cptr_buffer, cptr_points;
 CUgraphicsResource cugl_colorbuffer;
 CudaModularProgram* cuda_program = nullptr;
 CUevent cevent_start, cevent_end;
+cudaStream_t stream_upload;
 
 mutex mtx_load;
 mutex mtx_loadQueue;
@@ -80,6 +81,8 @@ void initCuda(){
 	CUcontext context;
 	cuDeviceGet(&cuDevice, 0);
 	cuCtxCreate(&context, 0, cuDevice);
+
+	cuStreamCreate(&stream_upload, CU_STREAM_NON_BLOCKING);
 }
 
 
@@ -128,7 +131,10 @@ shared_ptr<Buffer> loadLas(string path, uint32_t firstPoint, uint32_t numPoints)
 	
 	LasHeader header = readHeader(path);
 
-	shared_ptr<Buffer> pointBuffer = readBinaryFile(path, header.offsetToPointData, numPoints * header.recordLength);
+	shared_ptr<Buffer> pointBuffer = readBinaryFile(path, 
+		header.offsetToPointData + firstPoint * header.recordLength,
+		numPoints * header.recordLength
+	);
 	shared_ptr<Buffer> targetBuffer = make_shared<Buffer>(16 * numPoints);
 
 	int rgbOffset = 0;
@@ -149,8 +155,8 @@ shared_ptr<Buffer> loadLas(string path, uint32_t firstPoint, uint32_t numPoints)
 		float z = double(Z) * header.scale.z + header.offset.z - header.min.z;
 
 		uint32_t R = pointBuffer->get<uint16_t>(i * header.recordLength + rgbOffset + 0);
-		uint32_t G = pointBuffer->get<uint16_t>(i * header.recordLength + rgbOffset + 0);
-		uint32_t B = pointBuffer->get<uint16_t>(i * header.recordLength + rgbOffset + 0);
+		uint32_t G = pointBuffer->get<uint16_t>(i * header.recordLength + rgbOffset + 2);
+		uint32_t B = pointBuffer->get<uint16_t>(i * header.recordLength + rgbOffset + 4);
 
 		targetBuffer->set<float>(x, 16 * i + 0);
 		targetBuffer->set<float>(y, 16 * i + 4);
@@ -164,11 +170,11 @@ shared_ptr<Buffer> loadLas(string path, uint32_t firstPoint, uint32_t numPoints)
 	return targetBuffer;
 }
 
-vector<PointBatch> createPointBatches(string path){
+deque<PointBatch> createPointBatches(string path){
 
 	LasHeader header = readHeader(path);
 
-	vector<PointBatch> batches;
+	deque<PointBatch> batches;
 
 	uint64_t MAX_BATCH_SIZE = 1'000'000;
 	for(uint64_t first = 0; first < header.numPoints; first += MAX_BATCH_SIZE){
@@ -206,9 +212,10 @@ void spawnLoader(){
 				// load points in batch
 
 				shared_ptr<Buffer> points = loadLas(batch.file, batch.first, batch.count);
+				batch.points = points;
 
-				cout << "loaded points: " << batch.first << ":" << batch.count;
-				cout << "; xyz: " << points->get<float>(0) << ", " << points->get<float>(1) << ", " << points->get<float>(2) << endl;
+				//cout << "loaded points: " << batch.first << ":" << batch.count;
+				//cout << "; xyz: " << points->get<float>(0) << ", " << points->get<float>(1) << ", " << points->get<float>(2) << endl;
 
 				numPointsLoaded += batch.count;
 
@@ -218,6 +225,40 @@ void spawnLoader(){
 			}
 
 			std::this_thread::sleep_for(1ms);
+		}
+
+	});
+	t.detach();
+}
+
+void spawnUploader(){
+	thread t([&](){
+
+		while(true){
+
+			double t_start = now();
+
+			std::this_thread::sleep_for(100ns);
+
+			// this lock ensures that we don't reset and upload at the same time
+			lock_guard<mutex> lock_upload(mtx_upload);
+
+			// acquire work, or keep spinning if there is none
+			PointBatch batch;
+			{
+				lock_guard<mutex> lock_load(mtx_load);
+
+				if(loadedQueue.size() > 0){
+					batch = loadedQueue.front();
+					loadedQueue.pop_front();
+				}else{
+					continue;
+				}
+			}
+
+			auto target = cptr_points + uint64_t(16 * batch.first);
+			auto source = batch.points->data;
+			cuMemcpyHtoDAsync(target, source, batch.points->size, stream_upload);
 		}
 
 	});
@@ -325,6 +366,7 @@ void initCudaProgram(shared_ptr<GLRenderer> renderer, shared_ptr<Buffer> model){
 
 	cuMemAlloc(&cptr_buffer, 200'000'000);
 	cuMemAlloc(&cptr_points, header.numPoints * 16);
+	cuMemsetD32(cptr_points, 0, header.numPoints * 4);
 
 	cuda_program = new CudaModularProgram({
 		.modules = {
@@ -348,10 +390,12 @@ int main(){
 
 	auto renderer = make_shared<GLRenderer>();
 
-	renderer->controls->yaw    = 0.0;
-	renderer->controls->pitch  = 0.0;
-	renderer->controls->radius = 10;
-	renderer->controls->target = {0.0, 0.0, 0.0};
+	// position: 5.55246042571529, -2.0518362192283996, 4.1355448234314975 
+	renderer->controls->yaw    = 0.713;
+	renderer->controls->pitch  = -0.435;
+	renderer->controls->radius = 5.132;
+	renderer->controls->target = { 2.198, 1.470, 2.499, };
+
 
 	header = readHeader(path);
 	
@@ -359,6 +403,10 @@ int main(){
 	initCudaProgram(renderer, model);
 
 	spawnLoader();
+	spawnLoader();
+	spawnLoader();
+	spawnLoader();
+	spawnUploader();
 	loadQueue = createPointBatches(path);
 
 	auto update = [&](){
