@@ -85,6 +85,41 @@ struct mat4{
 	}
 };
 
+struct mat3{
+	float3 rows[3];
+
+	mat3(){
+
+	}
+
+	mat3(float3 row0, float3 row1, float3 row2){
+		rows[0] = row0;
+		rows[1] = row1;
+		rows[2] = row2;
+	}
+
+	static mat3 identity(){
+		mat3 id;
+
+		id.rows[0] = {1.0f, 0.0f, 0.0f};
+		id.rows[1] = {0.0f, 1.0f, 0.0f};
+		id.rows[2] = {0.0f, 0.0f, 1.0f};
+
+		return id;
+	}
+
+
+	mat3 transpose(){
+		mat3 result;
+
+		result.rows[0] = {rows[0].x, rows[1].x, rows[2].x};
+		result.rows[1] = {rows[0].y, rows[1].y, rows[2].y};
+		result.rows[2] = {rows[0].z, rows[1].z, rows[2].z};
+
+		return result;
+	}
+};
+
 int COLORMODE_TEXTURE          = 0;
 int COLORMODE_UV               = 1;
 int COLORMODE_TRIANGLE_ID      = 2;
