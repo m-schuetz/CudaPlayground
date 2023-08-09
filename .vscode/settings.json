@@ -89,7 +89,8 @@
 		"shared_mutex": "cpp",
 		"variant": "cpp",
 		"hash_map": "cpp",
-		"__config": "cpp"
+		"__config": "cpp",
+		"ranges": "cpp"
 	},
 	"files.trimTrailingWhitespace": false,
 	"editor.fontSize": 20,

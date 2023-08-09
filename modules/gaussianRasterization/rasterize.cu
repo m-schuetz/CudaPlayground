@@ -10,6 +10,8 @@
 // author: Alan Wolfe
 // (MIT LICENSE)
 
+uint32_t SPECIAL_IDX = 1298305;
+
 struct Point{
 	float x, y, z;
 	uint32_t color;
@@ -145,6 +147,7 @@ namespace cg = cooperative_groups;
 Uniforms uniforms;
 Allocator* allocator;
 uint64_t nanotime_start;
+mat4 viewProj;
 
 constexpr float PI = 3.1415;
 constexpr uint32_t BACKGROUND_COLOR = 0x00332211ull;
@@ -344,8 +347,8 @@ void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, Rasterizati
 	auto block = cg::this_thread_block();
 
 	int colorMode = settings.colorMode;
-	
-	mat4 transform = uniforms.proj * uniforms.view * settings.world;
+
+	mat4 transform = viewProj * settings.world;
 
 	uint32_t& processedTriangles = *allocator->alloc<uint32_t*>(4);
 	if(grid.thread_rank() == 0){
@@ -532,6 +535,58 @@ void kernel(
 
 	uniforms = _uniforms;
 
+	viewProj = uniforms.proj * uniforms.view;
+
+	viewProj.rows[0] = { 1.484, -0.024, -0.004, -0.004};
+	viewProj.rows[1] = { 0.013,  2.193, -0.291, -0.291};
+	viewProj.rows[2] = { 0.011,  0.666,  0.957,  0.957};
+	viewProj.rows[3] = {-0.487, -4.415,  3.940,  3.958};
+
+	viewProj = viewProj.transpose();
+	viewProj.rows[1].x *= -1.0f;
+	viewProj.rows[1].y *= -1.0f;
+	viewProj.rows[1].z *= -1.0f;
+	viewProj.rows[1].w *= -1.0f;
+	// viewProj.rows[0] = viewProj.rows[0] * -1.0f;
+	// viewProj.rows[1] = viewProj.rows[1] * -1.0f;
+
+
+	// {
+	// 	mat4 view;
+	// 	view.rows[0] = float4{1.000, -0.011, -0.004, -0.000};
+	// 	view.rows[1] = float4{0.009, 0.957, -0.291, 0.000};
+	// 	view.rows[2] = float4{0.007, 0.291, 0.957, 0.000};
+	// 	view.rows[3] = float4{-0.328, -1.926, 3.958, 1.000};
+	// 	// view = view.transpose();
+	// 	// view.rows[0] = view.rows[0] * -1.0f;
+	// 	// view.rows[1] = view.rows[1] * -1.0f;
+	// 	// view = uniforms.view;
+		
+	// 	// mat4 transform = uniforms.proj * uniforms.view * settings.world;
+	// 	// mat4 transform;
+	// 	// transform.rows[0] = {1.000, -0.011, -0.004, -0.000};
+	// 	// transform.rows[1] = {0.009, 0.957, -0.291, 0.000};
+	// 	// transform.rows[2] = {0.007, 0.291, 0.957, 0.000};
+	// 	// transform.rows[3] = {-0.328, -1.926, 3.958, 1.000};
+	// 	// transform = transform.transpose();
+
+	// 	mat4 transform = uniforms.proj * view * settings.world;
+
+	// 	if(grid.thread_rank() == 0){
+	// 		printf("===========================\n");
+	// 		printf("view: \n");
+	// 		printf("%.3f, %.3f, %.3f, %.3f \n", view.rows[0].x, view.rows[0].y, view.rows[0].z, view.rows[0].w);
+	// 		printf("%.3f, %.3f, %.3f, %.3f \n", view.rows[1].x, view.rows[1].y, view.rows[1].z, view.rows[1].w);
+	// 		printf("%.3f, %.3f, %.3f, %.3f \n", view.rows[2].x, view.rows[2].y, view.rows[2].z, view.rows[2].w);
+	// 		printf("%.3f, %.3f, %.3f, %.3f \n", view.rows[3].x, view.rows[3].y, view.rows[3].z, view.rows[3].w);
+	// 		printf("transform: \n");
+	// 		printf("%.3f, %.3f, %.3f, %.3f \n", transform.rows[0].x, transform.rows[0].y, transform.rows[0].z, transform.rows[0].w);
+	// 		printf("%.3f, %.3f, %.3f, %.3f \n", transform.rows[1].x, transform.rows[1].y, transform.rows[1].z, transform.rows[1].w);
+	// 		printf("%.3f, %.3f, %.3f, %.3f \n", transform.rows[2].x, transform.rows[2].y, transform.rows[2].z, transform.rows[2].w);
+	// 		printf("%.3f, %.3f, %.3f, %.3f \n", transform.rows[3].x, transform.rows[3].y, transform.rows[3].z, transform.rows[3].w);
+	// 	}
+	// }
+
 	Allocator _allocator(buffer, 0);
 	allocator = &_allocator;
 
@@ -547,6 +602,7 @@ void kernel(
 	triangles->uvs          = allocator->alloc<float2*  >(sizeof(float2) * vertexCapacity);
 	triangles->colors       = allocator->alloc<uint32_t*>(sizeof(uint32_t) * vertexCapacity);
 	triangles->numTriangles = 0;
+	
 
 	int numPixels = uniforms.width * uniforms.height;
 
@@ -572,7 +628,24 @@ void kernel(
 	// PROJECT POINTS TO PIXELS
 	processRange(uniforms.numPoints, [&](int index){
 
-		mat4 transform = uniforms.proj * uniforms.view;
+		// mat4 transform = uniforms.proj * uniforms.view;
+		mat4 transform = viewProj;
+
+
+		
+		// if(index == 0){
+		// 	printf("===========================\n");
+		// 	printf("transform: \n");
+		// 	printf("%.3f, %.3f, %.3f, %.3f \n", transform.rows[0].x, transform.rows[0].y, transform.rows[0].z, transform.rows[0].w);
+		// 	printf("%.3f, %.3f, %.3f, %.3f \n", transform.rows[1].x, transform.rows[1].y, transform.rows[1].z, transform.rows[1].w);
+		// 	printf("%.3f, %.3f, %.3f, %.3f \n", transform.rows[2].x, transform.rows[2].y, transform.rows[2].z, transform.rows[2].w);
+		// 	printf("%.3f, %.3f, %.3f, %.3f \n", transform.rows[3].x, transform.rows[3].y, transform.rows[3].z, transform.rows[3].w);
+		// }
+
+		// transform.rows[0] = {1.000, -0.011, -0.004, -0.000};
+		// transform.rows[1] = {0.009, 0.957, -0.291, 0.000};
+		// transform.rows[2] = {0.007, 0.291, 0.957, 0.000};
+		// transform.rows[3] = {-0.328, -1.926, 3.958, 1.000};
 
 		float3 center = {
 			get<float>(gaussians, uniforms.stride * index + 0),
@@ -611,23 +684,6 @@ void kernel(
 			get<float>(gaussians, uniforms.stride * index + 58 * 4 + 12),
 		};
 
-		
-
-
-		// index: 2434403
-		// if(index == 0){
-		// 	// printf("scale: %f, %f, %f \n", scale.x, scale.y, scale.z);
-		// 	printf("quaternion: %f, %f, %f, %f \n", quaternion.x, quaternion.y, quaternion.z, quaternion.w);
-		// }
-
-		// if(quaternion.x >= 1.04373801 - 0.00001 && quaternion.x <= 1.04373801 + 0.00001)
-		// if(quaternion.y >= 0.0234513991 - 0.00001 && quaternion.y <= 0.0234513991 + 0.00001)
-		// {
-		// 	printf("quaternion: %f, %f, %f, %f \n", quaternion.x, quaternion.y, quaternion.z, quaternion.w);
-		// 	printf("index: %i \n", index);
-		// }
-
-		// if(index == 2434403)
 		{
 			// printf("quaternion: %f, %f, %f, %f \n", quaternion.x, quaternion.y, quaternion.z, quaternion.w);
 			float l = length(quaternion);
@@ -646,6 +702,25 @@ void kernel(
 		}
 
 		mat3 rotation = quatToMat3(quaternion);
+
+		// if(index == SPECIAL_IDX){
+
+		// 	float4 p_hom = transform.transpose() * float4{center.x, center.y, center.z, 1.0};
+		// 	float p_w = 1.0f / (p_hom.w + 0.0000001f);
+		// 	float3 p_proj = { p_hom.x * p_w, p_hom.y * p_w, p_hom.z * p_w };
+
+		// 	printf("===========================\n");
+		// 	printf("point: %f, %f, %f \n", center.x, center.y, center.z);
+		// 	printf("p_hom: %f, %f, %f, %f \n", p_hom.x, p_hom.y, p_hom.z, p_hom.w);
+		// 	printf("p_proj: %f, %f, %f \n", p_proj.x, p_proj.y, p_proj.z);
+		// 	// printf("scale: %f, %f, %f \n", scale.x, scale.y, scale.z);
+
+		// 	printf("transform: \n");
+		// 	printf("%.3f, %.3f, %.3f, %.3f \n", transform.rows[0].x, transform.rows[0].y, transform.rows[0].z, transform.rows[0].w);
+		// 	printf("%.3f, %.3f, %.3f, %.3f \n", transform.rows[1].x, transform.rows[1].y, transform.rows[1].z, transform.rows[1].w);
+		// 	printf("%.3f, %.3f, %.3f, %.3f \n", transform.rows[2].x, transform.rows[2].y, transform.rows[2].z, transform.rows[2].w);
+		// 	printf("%.3f, %.3f, %.3f, %.3f \n", transform.rows[3].x, transform.rows[3].y, transform.rows[3].z, transform.rows[3].w);
+		// }
 
 		// if(false)
 		// if(index < 100'000)
@@ -872,6 +947,11 @@ void kernel(
 		RasterizationSettings settings;
 		settings.colorMode = COLORMODE_UV;
 		settings.world = mat4::identity();
+		// settings.world = mat4::translate(
+		// 	2.0 * cos(3.0 * uniforms.time),
+		// 	0.0, 
+		// 	0.0
+		// );
 
 		// if(grid.thread_rank() == 0){
 		// 	printf("%i \n", triangles->numTriangles);

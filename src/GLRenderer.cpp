@@ -117,7 +117,13 @@ void GLRenderer::init(){
 		const GLFWvidmode * modeLeft = glfwGetVideoMode(monitors[0]);
 		const GLFWvidmode * modeRight = glfwGetVideoMode(monitors[1]);
 
-		window = glfwCreateWindow(modeRight->width, modeRight->height - 300, "Simple example", nullptr, nullptr);
+		// int width = modeRight->width;
+		// int height = modeRight->height - 300;
+		int width = 1200;
+		int height = 777;
+		window = glfwCreateWindow(
+			width, height, 
+			"Simple example", nullptr, nullptr);
 
 		if (!window) {
 			glfwTerminate();
@@ -127,7 +133,6 @@ void GLRenderer::init(){
 		int xpos;
 		int ypos;
 		glfwGetMonitorPos(monitors[1], &xpos, &ypos);
-
 		glfwSetWindowPos(window, xpos, ypos);
 	} else {
 		const GLFWvidmode * mode = glfwGetVideoMode(monitors[0]);
