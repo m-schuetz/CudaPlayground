@@ -6,6 +6,33 @@
 #include "helper_math.h"
 #include "HostDeviceInterface.h"
 
+struct CudaPrint{
+	uint64_t CAPACITY = 1'000'000;
+	uint64_t offset = 0;
+	uint8_t* data = nullptr;
+
+	template <typename... Args>
+	inline void print(const char* str, const Args&... args) {
+
+		// constexpr uint32_t numargs{ sizeof...(Args) };
+
+		// int stringSize = strlen(str);
+		// int argsSize = 0;
+		// int numArgs = 0;
+
+		// for(const auto p : {args...}) {
+		// 	argsSize += sizeof(p);
+		// 	numArgs++;
+		// }
+
+		// printf("stringSize: %i, argsSize: %i, numArgs: %i \n", stringSize, argsSize, numArgs);
+
+		// printf("CAPACITY: %llu \n", CAPACITY);
+
+
+	}
+};
+
 // ray tracing adapted from tutorial: https://blog.demofox.org/2020/05/25/casual-shadertoy-path-tracing-1-basic-camera-diffuse-emissive/
 // author: Alan Wolfe
 // (MIT LICENSE)
@@ -521,12 +548,32 @@ void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, Rasterizati
 	// }
 }
 
+// template <typename... Args>
+// inline void printfmt(const char* str, const Args&... args) {
+
+// 	constexpr uint32_t numargs{ sizeof...(Args) };
+
+// 	int stringSize = strlen(str);
+// 	int argsSize = 0;
+// 	int numArgs = 0;
+
+// 	for(const auto p : {args...}) {
+// 		argsSize += sizeof(p);
+// 		numArgs++;
+// 	}
+
+// 	printf("stringSize: %i, argsSize: %i, numArgs: %i \n", stringSize, argsSize, numArgs);
+
+
+// }
+
 extern "C" __global__
 void kernel(
 	const Uniforms _uniforms,
 	unsigned int* buffer,
 	uint8_t* gaussians,
-	cudaSurfaceObject_t gl_colorbuffer
+	cudaSurfaceObject_t gl_colorbuffer,
+	CudaPrint* cudaprint
 ){
 	auto grid = cg::this_grid();
 	auto block = cg::this_thread_block();
@@ -549,6 +596,11 @@ void kernel(
 	viewProj.rows[1].w *= -1.0f;
 	// viewProj.rows[0] = viewProj.rows[0] * -1.0f;
 	// viewProj.rows[1] = viewProj.rows[1] * -1.0f;
+
+	if(grid.thread_rank() == 0){
+		cudaprint->print("test %f \n", 123, 456);
+		// printf("cudaprint: %llu \n", cudaprint->CAPACITY);
+	}
 
 
 	// {

@@ -13,6 +13,7 @@
 #include "CudaModularProgram.h"
 #include "GLRenderer.h"
 #include "cudaGL.h"
+#include "CudaPrint.h"
 // #include "builtin_types.h"
 
 #include "unsuck.hpp"
@@ -70,6 +71,8 @@ CUgraphicsResource cugl_colorbuffer;
 CudaModularProgram* cuda_program = nullptr;
 CUevent cevent_start, cevent_end;
 cudaStream_t stream_upload;
+
+CudaPrint cudaprint;
 
 mutex mtx_load;
 mutex mtx_loadQueue;
@@ -171,7 +174,7 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 
 
 	void* args[] = {
-		&uniforms, &cptr_buffer, &cptr_points, &output_surf
+		&uniforms, &cptr_buffer, &cptr_points, &output_surf, &cudaprint.cptr
 	};
 
 	auto res_launch = cuLaunchCooperativeKernel(cuda_program->kernels["kernel"],
@@ -191,6 +194,8 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 }
 
 void initCudaProgram(shared_ptr<GLRenderer> renderer, shared_ptr<Buffer> model){
+
+	cudaprint.init();
 
 	cuMemAlloc(&cptr_buffer, 1'000'000'000);
 	cuMemAlloc(&cptr_points, model->size);

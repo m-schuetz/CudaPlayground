@@ -16,6 +16,23 @@ typedef unsigned long long uint64_t;
 typedef long long int64_t;
 
 #define Infinity 0x7f800000
+constexpr uint32_t MAX_STRING_LENGTH = 1'000;
+
+inline uint32_t strlen(const char* str){
+
+	uint32_t length = 0;
+
+	for(int i = 0; i < MAX_STRING_LENGTH; i++){
+		if(str[i] != 0){
+			length++;
+		}else{
+			break;
+		}
+	}
+
+
+	return length;
+}
 
 // calls function <f> <size> times
 // calls are distributed over all available threads
