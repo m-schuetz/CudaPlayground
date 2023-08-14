@@ -70,9 +70,6 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <None Include="..\modules\voxelRasterization\rasterize.cu">
-      <Filter>cuda</Filter>
-    </None>
     <None Include="..\modules\voxelRasterization\utils.cu">
       <Filter>cuda</Filter>
     </None>

@@ -6,30 +6,116 @@
 #include "helper_math.h"
 #include "HostDeviceInterface.h"
 
+struct CudaPrintEntry{
+	uint32_t keylen;
+
+	uint8_t numArgs;
+	uint8_t method;
+	uint8_t padding_0;
+	uint8_t padding_1;
+
+	// uint32_t arglen;
+	// uint32_t argtype;
+	uint8_t data[1024 - 16];
+};
+
+constexpr uint32_t TYPE_UINT32_T = 0;
+constexpr uint32_t TYPE_UINT64_T = 1;
+constexpr uint32_t TYPE_INT32_T  = 2;
+constexpr uint32_t TYPE_INT64_T  = 3;
+constexpr uint32_t TYPE_FLOAT    = 4;
+constexpr uint32_t TYPE_DOUBLE   = 5;
+constexpr uint32_t TYPE_FLOAT2   = 100;
+constexpr uint32_t TYPE_FLOAT3   = 101;
+constexpr uint32_t TYPE_FLOAT4   = 102;
+constexpr uint32_t TYPE_MAT3     = 121;
+constexpr uint32_t TYPE_MAT4     = 122;
+
 struct CudaPrint{
-	uint64_t CAPACITY = 1'000'000;
-	uint64_t offset = 0;
-	uint8_t* data = nullptr;
+	uint64_t entryCounter = 0;
+	uint64_t padding;
+	CudaPrintEntry entries[1000];
+
+	static uint32_t typeof(uint32_t value){ return TYPE_UINT32_T; }
+	static uint32_t typeof(uint64_t value){ return TYPE_UINT64_T; }
+	static uint32_t typeof(int32_t  value){ return TYPE_INT32_T; }
+	static uint32_t typeof(int64_t  value){ return TYPE_INT64_T; }
+	static uint32_t typeof(float    value){ return TYPE_FLOAT; }
+	static uint32_t typeof(double   value){ return TYPE_DOUBLE; }
+	static uint32_t typeof(float2   value){ return TYPE_FLOAT2; }
+	static uint32_t typeof(float3   value){ return TYPE_FLOAT3; }
+	static uint32_t typeof(float4   value){ return TYPE_FLOAT4; }
+	static uint32_t typeof(mat3     value){ return TYPE_MAT3; }
+	static uint32_t typeof(mat4     value){ return TYPE_MAT4; }
+
+	void testType(uint32_t value){
+		printf("uint32_t \n");
+	}
+
+	void testType(int32_t value){
+		printf("int32_t \n");
+	}
+
+	void testType(float value){
+		printf("float \n");
+	}
 
 	template <typename... Args>
-	inline void print(const char* str, const Args&... args) {
+	inline void print(const char* key, const Args&... args) {
 
-		// constexpr uint32_t numargs{ sizeof...(Args) };
+		uint32_t entryIndex = atomicAdd(&entryCounter, 1) % 1000;
+		CudaPrintEntry *entry = &entries[entryIndex];
 
-		// int stringSize = strlen(str);
-		// int argsSize = 0;
-		// int numArgs = 0;
+		constexpr uint32_t numargs{ sizeof...(Args) };
 
-		// for(const auto p : {args...}) {
-		// 	argsSize += sizeof(p);
-		// 	numArgs++;
-		// }
+		int argsSize = 0;
 
-		// printf("stringSize: %i, argsSize: %i, numArgs: %i \n", stringSize, argsSize, numArgs);
+		for(const auto p : {args...}) {
+			// testType(p);
+			argsSize += sizeof(p);
+			entry->numArgs++;
+		}
 
-		// printf("CAPACITY: %llu \n", CAPACITY);
+		entry->keylen = strlen(key);
+		entry->method = 0;
+
+		memcpy(entry->data, key, entry->keylen);
+
+		uint32_t offset = entry->keylen;
+		for(const auto p : {args...}) {
+			// testType(p);
+			uint32_t argSize = sizeof(p);
+			uint32_t argtype = CudaPrint::typeof(p);
+			
+			memcpy(entry->data + offset, &argtype, 4);
+			offset += 4;
+			memcpy(entry->data + offset, &p, sizeof(p));
+			offset += sizeof(p);
+
+		}
+	}	
+
+	template <typename T>
+	inline void set(const char* key, const T value) {
+
+		uint32_t entryIndex = atomicAdd(&entryCounter, 1) % 1000;
+		CudaPrintEntry *entry = &entries[entryIndex];
+
+		entry->keylen   = strlen(key);
+		entry->numArgs  = 1;
+		entry->method   = 1;
+		// entry->arglen   = sizeof(value);
+		// entry->argtype  = CudaPrint::typeof(value);
+
+		// uint32_t arglen = sizeof(value);
+		uint32_t argtype = CudaPrint::typeof(value);
+
+		memcpy(entry->data, key, entry->keylen);
+		memcpy(entry->data + entry->keylen, &argtype, 4);
+		memcpy(entry->data + entry->keylen + 4, &value, sizeof(value));
 
 
+		// printf("entryCounter: %i \n", entryCounter);
 	}
 };
 
@@ -597,10 +683,12 @@ void kernel(
 	// viewProj.rows[0] = viewProj.rows[0] * -1.0f;
 	// viewProj.rows[1] = viewProj.rows[1] * -1.0f;
 
-	if(grid.thread_rank() == 0){
-		cudaprint->print("test %f \n", 123, 456);
-		// printf("cudaprint: %llu \n", cudaprint->CAPACITY);
-	}
+	// if(grid.thread_rank() == 0){
+	// 	cudaprint->set("test u32", 123);
+	// 	cudaprint->set("a float3 ", float3{1.0, 2.0, 3.0});
+
+	// 	cudaprint->print("-abc {:.2f} def- \n", 134.1f);
+	// }
 
 
 	// {

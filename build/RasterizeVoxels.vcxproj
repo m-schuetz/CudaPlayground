@@ -92,7 +92,7 @@
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS;WIN32;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpplatest</LanguageStandard>
-      <AdditionalIncludeDirectories>$(SolutionDir)..\include;$(SolutionDir)..\libs\glfw\include;$(SolutionDir)..\libs\glew\include;$(SolutionDir)..\libs\imgui\;$(SolutionDir)..\libs\implot\;$(SolutionDir)..\libs\imgui\backends;$(SolutionDir)..\libs\glm;$(SolutionDir)..\modules;$(SolutionDir)..\libs\json;$(SolutionDir)..\libs\openvr\headers;$(CUDA_PATH)\include;$(SolutionDir)..\libs\toojpeg;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)..\include;$(SolutionDir)..\libs\glfw\include;$(SolutionDir)..\libs\glew\include;$(SolutionDir)..\libs\imgui\;$(SolutionDir)..\libs\implot\;$(SolutionDir)..\libs\imgui\backends;$(SolutionDir)..\libs\glm;$(SolutionDir)..\modules;$(SolutionDir)..\libs\json;$(SolutionDir)..\libs\openvr\headers;$(CUDA_PATH)\include;$(SolutionDir)..\libs\toojpeg;$(SolutionDir)..\libs\fmt\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -129,7 +129,7 @@
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS;WIN32;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpplatest</LanguageStandard>
-      <AdditionalIncludeDirectories>$(SolutionDir)..\include;$(SolutionDir)..\libs\glfw\include;$(SolutionDir)..\libs\glew\include;$(SolutionDir)..\libs\imgui\;$(SolutionDir)..\libs\implot\;$(SolutionDir)..\libs\imgui\backends;$(SolutionDir)..\libs\glm;$(SolutionDir)..\modules;$(SolutionDir)..\libs\json;$(SolutionDir)..\libs\openvr\headers;$(CUDA_PATH)\include;$(SolutionDir)..\libs\toojpeg;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)..\include;$(SolutionDir)..\libs\glfw\include;$(SolutionDir)..\libs\glew\include;$(SolutionDir)..\libs\imgui\;$(SolutionDir)..\libs\implot\;$(SolutionDir)..\libs\imgui\backends;$(SolutionDir)..\libs\glm;$(SolutionDir)..\modules;$(SolutionDir)..\libs\json;$(SolutionDir)..\libs\openvr\headers;$(CUDA_PATH)\include;$(SolutionDir)..\libs\toojpeg;$(SolutionDir)..\libs\fmt\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -168,7 +168,6 @@
     <ClInclude Include="..\libs\implot\implot_internal.h" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="..\modules\voxelRasterization\rasterize.cu" />
     <None Include="..\modules\voxelRasterization\utils.cu" />
     <None Include="..\modules\voxelRasterization\utils.h.cu" />
   </ItemGroup>

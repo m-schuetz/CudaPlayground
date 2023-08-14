@@ -304,7 +304,7 @@ int main(){
 	initCudaProgram(renderer, model);
 
 	auto update = [&](){
-		
+		cudaprint.update();
 	};
 
 	auto render = [&](){
@@ -332,7 +332,7 @@ int main(){
 		{ // SETTINGS WINDOW
 
 			ImGui::SetNextWindowPos(ImVec2(10, 280 + 180 + 10));
-			ImGui::SetNextWindowSize(ImVec2(490, 230));
+			ImGui::SetNextWindowSize(ImVec2(490, 140));
 
 			ImGui::Begin("Settings");
 
@@ -363,6 +363,67 @@ int main(){
 				string str = ss.str();
 				
 				toClipboard(str);
+			}
+
+			ImGui::End();
+		}
+
+		{ // DEBUG
+
+			ImGui::SetNextWindowPos(ImVec2(10, 280 + 180 + 10 + 140 + 10));
+			ImGui::SetNextWindowSize(ImVec2(490, 140));
+
+			ImGui::Begin("Debug Info");
+
+			// int longestKey = 0;
+			// for(auto [key, entry] : cudaprint.table){
+			// 	longestKey = max(longestKey, key.size());
+			// }
+
+			for(auto [key, entry] : cudaprint.table){
+
+				string txt = "";
+
+				auto arg = entry.getArgument(0);
+
+				if(arg.type == TYPE_INT32_T){
+					txt = std::format("{:20} {} \n", key, arg.get<int32_t>());
+				}else if(arg.type == TYPE_UINT32_T){
+					txt = std::format("{:20} {} \n", key, arg.get<uint32_t>());
+				}else if(arg.type == TYPE_FLOAT){
+					txt = std::format("{:20} {} \n", key, arg.get<float>());
+				}else if(arg.type == TYPE_FLOAT3){
+					float3 value = arg.get<float3>();
+					txt = std::vformat("{:20} {:.3f}, {:.3f}, {:.3f} \n", make_format_args(key, value.x, value.y, value.z));
+				}else if (arg.type == TYPE_MAT4) {
+					mat4 value = arg.get<mat4>();
+					// txt += std::format("{:20} \n", key);
+					txt += std::vformat("{:20}{:7.3f}, {:7.3f}, {:7.3f}, {:7.3f} \n", make_format_args(key, value[0].x, value[0].y, value[0].z, value[0].w));
+					txt += std::vformat("{:20}{:7.3f}, {:7.3f}, {:7.3f}, {:7.3f} \n", make_format_args(" ", value[1].x, value[1].y, value[1].z, value[1].w));
+					txt += std::vformat("{:20}{:7.3f}, {:7.3f}, {:7.3f}, {:7.3f} \n", make_format_args(" ", value[2].x, value[2].y, value[2].z, value[2].w));
+					txt += std::vformat("{:20}{:7.3f}, {:7.3f}, {:7.3f}, {:7.3f} \n", make_format_args(" ", value[3].x, value[3].y, value[3].z, value[3].w));
+				}
+
+				// if(entry.argtype == TYPE_INT32_T){
+				// 	txt = std::format("{:20} {} \n", key, entry.get<int32_t>());
+				// }else if(entry.argtype == TYPE_UINT32_T){
+				// 	txt = std::format("{:20} {} \n", key, entry.get<uint32_t>());
+				// }else if(entry.argtype == TYPE_FLOAT){
+				// 	txt = std::format("{:20} {} \n", key, entry.get<float>());
+				// }else if(entry.argtype == TYPE_FLOAT3){
+				// 	float3 value = entry.get<float3>();
+				// 	txt = std::vformat("{:20} {:.3f}, {:.3f}, {:.3f} \n", make_format_args(key, value.x, value.y, value.z));
+				// }else if (entry.argtype == TYPE_MAT4) {
+				// 	mat4 value = entry.get<mat4>();
+				// 	// txt += std::format("{:20} \n", key);
+				// 	txt += std::vformat("{:20}{:7.3f}, {:7.3f}, {:7.3f}, {:7.3f} \n", make_format_args(key, value[0].x, value[0].y, value[0].z, value[0].w));
+				// 	txt += std::vformat("{:20}{:7.3f}, {:7.3f}, {:7.3f}, {:7.3f} \n", make_format_args(" ", value[1].x, value[1].y, value[1].z, value[1].w));
+				// 	txt += std::vformat("{:20}{:7.3f}, {:7.3f}, {:7.3f}, {:7.3f} \n", make_format_args(" ", value[2].x, value[2].y, value[2].z, value[2].w));
+				// 	txt += std::vformat("{:20}{:7.3f}, {:7.3f}, {:7.3f}, {:7.3f} \n", make_format_args(" ", value[3].x, value[3].y, value[3].z, value[3].w));
+				// }
+				
+				ImGui::Text(txt.c_str());
+
 			}
 
 			ImGui::End();
