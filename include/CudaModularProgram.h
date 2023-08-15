@@ -45,10 +45,15 @@ struct CudaModule{
 		success = false;
 
 		string dir = fs::path(path).parent_path().string();
-		string optInclude = "-I " + dir;
+		// string optInclude = "-I " + dir;
 
 		string cuda_path = std::getenv("CUDA_PATH");
-		string cuda_include = "-I " + cuda_path + "/include";
+		// string cuda_include = "-I " + cuda_path + "/include";
+
+		string optInclude = std::format("-I {}", dir).c_str();
+		string cuda_include = std::format("-I {}/include", cuda_path);
+		string cudastd_include = std::format("-I {}/include/cuda/std", cuda_path);
+		string cudastd_detail_include = std::format("-I {}/include/cuda/std/detail/libcxx/include", cuda_path);
 
 		nvrtcProgram prog;
 		string source = readFile(path);
@@ -61,6 +66,8 @@ struct CudaModule{
 			"-lineinfo",
 			optInclude.c_str(),
 			cuda_include.c_str(),
+			cudastd_include.c_str(),
+			cudastd_detail_include.c_str(),
 			"--relocatable-device-code=true",
 			"-default-device",
 			"-dlto", 

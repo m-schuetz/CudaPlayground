@@ -5,18 +5,10 @@
 #include "CudaModularProgram.h"
 #include "cuda.h"
 #include "cuda_runtime.h"
-
 #include "fmt/format.h"
-//#include "fmt/core.h"
 #include "fmt/args.h"
 
-#include "HostDeviceInterface.h"
-
-// #include "glm/common.hpp"
-// #include "glm/matrix.hpp"
-
-using glm::mat4;
-using glm::mat3;
+// #include "HostDeviceInterface.h"
 
 constexpr uint32_t MAX_CUDAPRINT_ENTRIES = 1000;
 
@@ -26,11 +18,6 @@ constexpr uint32_t TYPE_INT32_T  = 2;
 constexpr uint32_t TYPE_INT64_T  = 3;
 constexpr uint32_t TYPE_FLOAT    = 4;
 constexpr uint32_t TYPE_DOUBLE   = 5;
-constexpr uint32_t TYPE_FLOAT2   = 100;
-constexpr uint32_t TYPE_FLOAT3   = 101;
-constexpr uint32_t TYPE_FLOAT4   = 102;
-constexpr uint32_t TYPE_MAT3     = 121;
-constexpr uint32_t TYPE_MAT4     = 122;
 
 constexpr uint32_t TYPE_SIZE_UINT32_T = sizeof(uint32_t);
 constexpr uint32_t TYPE_SIZE_UINT64_T = sizeof(uint64_t);
@@ -38,26 +25,16 @@ constexpr uint32_t TYPE_SIZE_INT32_T  = sizeof(int32_t);
 constexpr uint32_t TYPE_SIZE_INT64_T  = sizeof(int64_t);
 constexpr uint32_t TYPE_SIZE_FLOAT    = sizeof(float);
 constexpr uint32_t TYPE_SIZE_DOUBLE   = sizeof(double);
-constexpr uint32_t TYPE_SIZE_FLOAT2   = sizeof(float2);
-constexpr uint32_t TYPE_SIZE_FLOAT3   = sizeof(float3);
-constexpr uint32_t TYPE_SIZE_FLOAT4   = sizeof(float4);
-constexpr uint32_t TYPE_SIZE_MAT3     = sizeof(mat3);
-constexpr uint32_t TYPE_SIZE_MAT4     = sizeof(mat4);
 
 static int getByteSize(uint32_t type){
-
 	if(type == TYPE_UINT32_T) return sizeof(uint32_t);
 	if(type == TYPE_UINT64_T) return sizeof(uint64_t);
 	if(type == TYPE_INT32_T)  return sizeof(int32_t);
 	if(type == TYPE_INT64_T)  return sizeof(int64_t);
 	if(type == TYPE_FLOAT)    return sizeof(float);
 	if(type == TYPE_DOUBLE)   return sizeof(double);
-	if(type == TYPE_FLOAT2)   return sizeof(float2);
-	if(type == TYPE_FLOAT3)   return sizeof(float3);
-	if(type == TYPE_FLOAT4)   return sizeof(float4);
-	if(type == TYPE_MAT3)     return sizeof(mat3);
-	if(type == TYPE_MAT4)     return sizeof(mat4);
 
+	return 0;
 }
 
 struct CudaPrintArgument{
@@ -83,8 +60,6 @@ struct CudaPrintEntry{
 	uint8_t padding_0;
 	uint8_t padding_1;
 
-	// uint32_t arglen;
-	// uint32_t argtype;
 	uint8_t data[1024 - 16];
 
 	CudaPrintArgument getArgument(int index){
@@ -149,14 +124,6 @@ struct CudaPrint {
 
 		cuMemAllocHost((void**)&data_pinned , sizeof(CudaPrintBuffer));
 		printBuffer = (CudaPrintBuffer*)data_pinned;
-
-
-		// struct {
-		// 	uint64_t CAPACITY = 1'000'000;
-		// 	uint64_t offset = 0;
-		// }initdata;
-
-		// cuMemcpyHtoD (cptr, &initdata, 16);
 	}
 
 	void processEntry(CudaPrintEntry entry){
@@ -183,8 +150,6 @@ struct CudaPrint {
 			// Method SET key/value
 			table[strKey] = entry;
 		}
-
-		// printfmt("loaded entry! keylen: {:3}, key: {} \n", entry.keylen, strKey);
 	}
 
 	void update(){

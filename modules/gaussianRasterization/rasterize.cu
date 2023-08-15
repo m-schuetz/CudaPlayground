@@ -1,3 +1,4 @@
+
 #include <cooperative_groups.h>
 #include <curand_kernel.h>
 
@@ -6,118 +7,7 @@
 #include "helper_math.h"
 #include "HostDeviceInterface.h"
 
-struct CudaPrintEntry{
-	uint32_t keylen;
-
-	uint8_t numArgs;
-	uint8_t method;
-	uint8_t padding_0;
-	uint8_t padding_1;
-
-	// uint32_t arglen;
-	// uint32_t argtype;
-	uint8_t data[1024 - 16];
-};
-
-constexpr uint32_t TYPE_UINT32_T = 0;
-constexpr uint32_t TYPE_UINT64_T = 1;
-constexpr uint32_t TYPE_INT32_T  = 2;
-constexpr uint32_t TYPE_INT64_T  = 3;
-constexpr uint32_t TYPE_FLOAT    = 4;
-constexpr uint32_t TYPE_DOUBLE   = 5;
-constexpr uint32_t TYPE_FLOAT2   = 100;
-constexpr uint32_t TYPE_FLOAT3   = 101;
-constexpr uint32_t TYPE_FLOAT4   = 102;
-constexpr uint32_t TYPE_MAT3     = 121;
-constexpr uint32_t TYPE_MAT4     = 122;
-
-struct CudaPrint{
-	uint64_t entryCounter = 0;
-	uint64_t padding;
-	CudaPrintEntry entries[1000];
-
-	static uint32_t typeof(uint32_t value){ return TYPE_UINT32_T; }
-	static uint32_t typeof(uint64_t value){ return TYPE_UINT64_T; }
-	static uint32_t typeof(int32_t  value){ return TYPE_INT32_T; }
-	static uint32_t typeof(int64_t  value){ return TYPE_INT64_T; }
-	static uint32_t typeof(float    value){ return TYPE_FLOAT; }
-	static uint32_t typeof(double   value){ return TYPE_DOUBLE; }
-	static uint32_t typeof(float2   value){ return TYPE_FLOAT2; }
-	static uint32_t typeof(float3   value){ return TYPE_FLOAT3; }
-	static uint32_t typeof(float4   value){ return TYPE_FLOAT4; }
-	static uint32_t typeof(mat3     value){ return TYPE_MAT3; }
-	static uint32_t typeof(mat4     value){ return TYPE_MAT4; }
-
-	void testType(uint32_t value){
-		printf("uint32_t \n");
-	}
-
-	void testType(int32_t value){
-		printf("int32_t \n");
-	}
-
-	void testType(float value){
-		printf("float \n");
-	}
-
-	template <typename... Args>
-	inline void print(const char* key, const Args&... args) {
-
-		uint32_t entryIndex = atomicAdd(&entryCounter, 1) % 1000;
-		CudaPrintEntry *entry = &entries[entryIndex];
-
-		constexpr uint32_t numargs{ sizeof...(Args) };
-
-		int argsSize = 0;
-
-		for(const auto p : {args...}) {
-			// testType(p);
-			argsSize += sizeof(p);
-			entry->numArgs++;
-		}
-
-		entry->keylen = strlen(key);
-		entry->method = 0;
-
-		memcpy(entry->data, key, entry->keylen);
-
-		uint32_t offset = entry->keylen;
-		for(const auto p : {args...}) {
-			// testType(p);
-			uint32_t argSize = sizeof(p);
-			uint32_t argtype = CudaPrint::typeof(p);
-			
-			memcpy(entry->data + offset, &argtype, 4);
-			offset += 4;
-			memcpy(entry->data + offset, &p, sizeof(p));
-			offset += sizeof(p);
-
-		}
-	}	
-
-	template <typename T>
-	inline void set(const char* key, const T value) {
-
-		uint32_t entryIndex = atomicAdd(&entryCounter, 1) % 1000;
-		CudaPrintEntry *entry = &entries[entryIndex];
-
-		entry->keylen   = strlen(key);
-		entry->numArgs  = 1;
-		entry->method   = 1;
-		// entry->arglen   = sizeof(value);
-		// entry->argtype  = CudaPrint::typeof(value);
-
-		// uint32_t arglen = sizeof(value);
-		uint32_t argtype = CudaPrint::typeof(value);
-
-		memcpy(entry->data, key, entry->keylen);
-		memcpy(entry->data + entry->keylen, &argtype, 4);
-		memcpy(entry->data + entry->keylen + 4, &value, sizeof(value));
-
-
-		// printf("entryCounter: %i \n", entryCounter);
-	}
-};
+#include "CudaPrint.cu"
 
 // ray tracing adapted from tutorial: https://blog.demofox.org/2020/05/25/casual-shadertoy-path-tracing-1-basic-camera-diffuse-emissive/
 // author: Alan Wolfe
@@ -680,52 +570,16 @@ void kernel(
 	viewProj.rows[1].y *= -1.0f;
 	viewProj.rows[1].z *= -1.0f;
 	viewProj.rows[1].w *= -1.0f;
-	// viewProj.rows[0] = viewProj.rows[0] * -1.0f;
-	// viewProj.rows[1] = viewProj.rows[1] * -1.0f;
 
-	// if(grid.thread_rank() == 0){
-	// 	cudaprint->set("test u32", 123);
-	// 	cudaprint->set("a float3 ", float3{1.0, 2.0, 3.0});
+	if(grid.thread_rank() == 0){
+		cudaprint->set("test u32", 123);
+		cudaprint->set("test key", "abc value");
 
-	// 	cudaprint->print("-abc {:.2f} def- \n", 134.1f);
-	// }
+		if(int(uniforms.time * 100.0) % 100 < 1){
+			cudaprint->print("-abc {:.2f} def- \n", 134.1f);
+		}
+	}
 
-
-	// {
-	// 	mat4 view;
-	// 	view.rows[0] = float4{1.000, -0.011, -0.004, -0.000};
-	// 	view.rows[1] = float4{0.009, 0.957, -0.291, 0.000};
-	// 	view.rows[2] = float4{0.007, 0.291, 0.957, 0.000};
-	// 	view.rows[3] = float4{-0.328, -1.926, 3.958, 1.000};
-	// 	// view = view.transpose();
-	// 	// view.rows[0] = view.rows[0] * -1.0f;
-	// 	// view.rows[1] = view.rows[1] * -1.0f;
-	// 	// view = uniforms.view;
-		
-	// 	// mat4 transform = uniforms.proj * uniforms.view * settings.world;
-	// 	// mat4 transform;
-	// 	// transform.rows[0] = {1.000, -0.011, -0.004, -0.000};
-	// 	// transform.rows[1] = {0.009, 0.957, -0.291, 0.000};
-	// 	// transform.rows[2] = {0.007, 0.291, 0.957, 0.000};
-	// 	// transform.rows[3] = {-0.328, -1.926, 3.958, 1.000};
-	// 	// transform = transform.transpose();
-
-	// 	mat4 transform = uniforms.proj * view * settings.world;
-
-	// 	if(grid.thread_rank() == 0){
-	// 		printf("===========================\n");
-	// 		printf("view: \n");
-	// 		printf("%.3f, %.3f, %.3f, %.3f \n", view.rows[0].x, view.rows[0].y, view.rows[0].z, view.rows[0].w);
-	// 		printf("%.3f, %.3f, %.3f, %.3f \n", view.rows[1].x, view.rows[1].y, view.rows[1].z, view.rows[1].w);
-	// 		printf("%.3f, %.3f, %.3f, %.3f \n", view.rows[2].x, view.rows[2].y, view.rows[2].z, view.rows[2].w);
-	// 		printf("%.3f, %.3f, %.3f, %.3f \n", view.rows[3].x, view.rows[3].y, view.rows[3].z, view.rows[3].w);
-	// 		printf("transform: \n");
-	// 		printf("%.3f, %.3f, %.3f, %.3f \n", transform.rows[0].x, transform.rows[0].y, transform.rows[0].z, transform.rows[0].w);
-	// 		printf("%.3f, %.3f, %.3f, %.3f \n", transform.rows[1].x, transform.rows[1].y, transform.rows[1].z, transform.rows[1].w);
-	// 		printf("%.3f, %.3f, %.3f, %.3f \n", transform.rows[2].x, transform.rows[2].y, transform.rows[2].z, transform.rows[2].w);
-	// 		printf("%.3f, %.3f, %.3f, %.3f \n", transform.rows[3].x, transform.rows[3].y, transform.rows[3].z, transform.rows[3].w);
-	// 	}
-	// }
 
 	Allocator _allocator(buffer, 0);
 	allocator = &_allocator;
