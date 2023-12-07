@@ -119,8 +119,8 @@ void GLRenderer::init(){
 
 		// int width = modeRight->width;
 		// int height = modeRight->height - 300;
-		int width = 1200;
-		int height = 777;
+		int width = 1920;
+		int height = 1080;
 		window = glfwCreateWindow(
 			width, height, 
 			"Simple example", nullptr, nullptr);

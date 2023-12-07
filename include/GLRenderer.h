@@ -138,7 +138,7 @@ struct Camera{
 
 	double aspect = 1.0;
 	double fovy = 60.0;
-	double near = 0.1;
+	double near = 0.01;
 	double far = 2'000'000.0;
 	int width = 128;
 	int height = 128;

@@ -487,8 +487,7 @@ void kernel(
 		{
 			color = color / (maxNanos / 255);
 		}
-		if(x < 400)/*
-			*/color = 0x000000ff;
+
 
 
 		surf2Dwrite(color, gl_colorbuffer, x * 4, y);
