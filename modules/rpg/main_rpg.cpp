@@ -88,6 +88,9 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 	uniforms.time = now();
 	uniforms.colorMode = colorMode;
 	uniforms.sampleMode = sampleMode;
+	uniforms.mouse_x = Runtime::mousePosition.x;
+	uniforms.mouse_y = Runtime::mousePosition.y;
+	uniforms.mouse_buttons = Runtime::mouseButtons;
 
 	glm::mat4 rotX = glm::rotate(glm::mat4(), 3.1415f * 0.5f, glm::vec3(1.0, 0.0, 0.0));
 

@@ -104,4 +104,7 @@ struct Uniforms{
 	mat4 transform;
 	int colorMode;
 	int sampleMode;
+	float mouse_x;
+	float mouse_y;
+	uint32_t mouse_buttons;
 };

@@ -98,19 +98,22 @@ struct Map{
 
 };
 
-void drawMap(Map* map, uint64_t* framebuffer){
+void drawMap(Map* map, uint64_t* framebuffer, int2 mappos, int pixelScale){
 
 	auto grid = cg::this_grid();
 
 	uint32_t numTiles = map->width * map->height;
-	uint32_t pixelScale = 4;
 	uint32_t tilesize = 16;
 
 	uint32_t px_width = map->width * pixelScale * tilesize;
 	uint32_t px_height = map->height * pixelScale * tilesize;
-	
-	// if(grid.thread_rank() == 0)
-	// 	printf("%u \n", px_width);
+
+	// MOUSE
+	int mouse_x = uniforms.mouse_x;
+	int mouse_y = uniforms.height - uniforms.mouse_y;
+	int mousePixelID = mouse_x + mouse_y * uniforms.width;
+	int mouse_tx = floor(((mouse_x - mappos.x) / pixelScale) / 16.0f);
+	int mouse_ty = floor(((mouse_y - mappos.y) / pixelScale) / 16.0f);
 
 	processRange(px_width * px_height, [&](int localPixelIndex){
 
@@ -123,32 +126,39 @@ void drawMap(Map* map, uint64_t* framebuffer){
 		uint32_t maptile_x = (lpx / pixelScale) / tilesize;
 		uint32_t maptile_y = (lpy / pixelScale) / tilesize;
 		uint32_t maptileID = maptile_x + maptile_y * map->width;
+		uint32_t maptile_local_x = (lpx / pixelScale) % tileset.tilesize;
+		uint32_t maptile_local_y = (lpy / pixelScale) % tileset.tilesize;
 
 		uint32_t tileID = layer.data[maptileID];
+		uint32_t color = 0;
+		uint8_t* rgba = (uint8_t*)&color;
+
+		if(maptile_x == mouse_tx)
+		if(maptile_y == mouse_ty)
+		{
+			tileID = 2;
+		}
+
 		uint32_t tileX = tileID % tileset.width;
 		uint32_t tileY = tileID / tileset.width;
 
 		uint32_t tox = tileset.tilesize * tileX;
 		uint32_t toy = tileset.tilesize * tileY;
-		uint32_t maptile_local_x = (lpx / pixelScale) % tileset.tilesize;
-		uint32_t maptile_local_y = (lpy / pixelScale) % tileset.tilesize;
-
-		uint32_t target_x = lpx + 1300;
-		uint32_t target_y = lpy +  50;
-
-		uint32_t color = 0;
-		uint8_t* rgba = (uint8_t*)&color;
+		
+		uint32_t target_x = lpx + mappos.x;
+		uint32_t target_y = lpy + mappos.y;
 
 		uint32_t tx = tox + maptile_local_x;
 		uint32_t ty = (tileset.texture.height - 1) - (toy + maptile_local_y);
 		uint32_t texelID = tx + ty * tileset.texture.width;
 		color = tileset.texture.data[texelID];
 
-		// if(lpx == 136)
-		// if(lpy == 10)
-		// {
-		// 	printf("%u \n", ty);
-		// }
+		if(maptile_x == mouse_tx)
+		if(maptile_y == mouse_ty)
+		if(maptile_local_x == 0 || maptile_local_x == 15 || maptile_local_y == 0 || maptile_local_y == 15)
+		{
+			color = 0x00ffffff;
+		}
 
 		uint64_t encoded = color;
 		uint32_t targetPixelIndex = target_x + uniforms.width * target_y;
@@ -232,12 +242,9 @@ void kernel(
 	Allocator _allocator(buffer, 0);
 	allocator = &_allocator;
 
-	// allocate framebuffer memory
-	int framebufferSize = int(uniforms.width) * int(uniforms.height) * sizeof(uint64_t);
-	uint64_t* framebuffer = allocator->alloc<uint64_t*>(framebufferSize);
-
-	globals.img_ascii_16 = img_ascii_16;
-	globals.framebuffer = framebuffer;
+	uint64_t& initialized = *allocator->alloc<uint64_t*>(8);
+	constexpr uint64_t INITVAL = 4311624356192387;
+	bool isInitialized = initialized == INITVAL;
 
 	Texture texture;
 	texture.width  = 256;
@@ -258,16 +265,10 @@ void kernel(
 	map.layer_0.tileset = tileset;
 	map.layer_0.data = allocator->alloc<uint32_t*>(map.width * map.height * sizeof(uint32_t));
 
-	processRange(map.width * map.height, [&](int index){
-		map.layer_0.data[index] = index;
-	});
-
-	grid.sync();
-
 	// grass:  224, 208, 192, 176, 160
 	// earth:  244, 228, 212, 196, 180
 
-	{
+	if(!isInitialized){
 		uint32_t row_9[13] = {160, 176, 224, 208, 192, 176, 160, 208, 192, 176, 160, 224, 224};
 		uint32_t row_8[13] = {208, 192, 241, 242, 242, 242, 242, 243, 224, 208, 192, 176, 224};
 		uint32_t row_7[13] = {224, 208, 225, 244, 228, 226, 226, 227, 224, 224, 208, 192, 176};
@@ -289,7 +290,19 @@ void kernel(
 		memcpy(&map.layer_0.data[ 26], row_2, 13 * sizeof(uint32_t));
 		memcpy(&map.layer_0.data[ 13], row_1, 13 * sizeof(uint32_t));
 		memcpy(&map.layer_0.data[  0], row_0, 13 * sizeof(uint32_t));
+
+		initialized = INITVAL;
 	}
+
+	// processRange(map.width * map.height, [&](int index){
+	// 	map.layer_0.data[index] = index;
+	// });
+
+	grid.sync();
+
+	// allocate framebuffer memory
+	int framebufferSize = int(uniforms.width) * int(uniforms.height) * sizeof(uint64_t);
+	uint64_t* framebuffer = allocator->alloc<uint64_t*>(framebufferSize);
 
 	// clear framebuffer
 	processRange(0, uniforms.width * uniforms.height, [&](int pixelIndex){
@@ -299,8 +312,47 @@ void kernel(
 
 	grid.sync();
 
-	drawMap(&map, framebuffer);
+	globals.img_ascii_16 = img_ascii_16;
+	globals.framebuffer = framebuffer;
 
+	grid.sync();
+
+	int2 mappos = {1300, 50};
+	uint32_t pixelScale = 4;
+
+	// MOUSE
+	int mouse_x = uniforms.mouse_x;
+	int mouse_y = uniforms.height - uniforms.mouse_y;
+	int mousePixelID = mouse_x + mouse_y * uniforms.width;
+	int mouse_tx = floor(((mouse_x - mappos.x) / pixelScale) / 16.0f);
+	int mouse_ty = floor(((mouse_y - mappos.y) / pixelScale) / 16.0f);
+	
+	if(grid.thread_rank() == 0)
+	if(mouse_tx >= 0 && mouse_tx < map.width)
+	if(mouse_ty >= 0 && mouse_ty < map.height)
+	if(uniforms.mouse_buttons != 0)
+	{
+		int maptileID = mouse_tx + mouse_ty * map.width;
+		map.layer_0.data[maptileID] = 2;
+		// printf("%i, %i \n", mouse_tx, maptileID);
+	}
+
+
+	grid.sync();
+
+	drawMap(&map, framebuffer, mappos, pixelScale);
+
+	// // MOUSE
+	// int mouse_x = uniforms.mouse_x;
+	// int mouse_y = uniforms.height - uniforms.mouse_y;
+	// int mousePixelID = mouse_x + mouse_y * uniforms.width;
+	// framebuffer[mousePixelID] = 0x00000000'000000ffull;
+
+
+	// framebuffer[targetPixelIndex] = encoded;
+
+	// DRAW TILESET
+	// if(false)
 	processRange(0, 1024 * 1024, [&](int localPixelIndex){
 
 		int x = localPixelIndex % 1024;
