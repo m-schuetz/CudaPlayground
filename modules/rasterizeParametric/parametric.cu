@@ -14,7 +14,6 @@ namespace cg = cooperative_groups;
 
 Uniforms uniforms;
 Allocator* allocator;
-uint64_t nanotime_start;
 
 constexpr float PI = 3.1415;
 constexpr uint32_t BACKGROUND_COLOR = 0x00332211ull;
@@ -349,7 +348,13 @@ void generatePatches2(Patch* patches, uint32_t* numPatches, int threshold, Unifo
 
 }
 
-void rasterizePatches_32x32(Patch* patches, uint32_t* numPatches, uint64_t* framebuffer, Uniforms& uniforms){
+void rasterizePatches_32x32(
+	Patch* patches, uint32_t* numPatches, 
+	uint64_t* framebuffer, 
+	Uniforms& uniforms,
+	Patch* newPatches, uint32_t* numNewPatches, 
+	bool createNewPatches
+){
 
 	auto grid = cg::this_grid();
 	auto block = cg::this_thread_block();
@@ -363,6 +368,8 @@ void rasterizePatches_32x32(Patch* patches, uint32_t* numPatches, uint64_t* fram
 
 	__shared__ int sh_patchIndex;
 	__shared__ float sh_samples[1024 * 3];
+	__shared__ int sh_pixelPositions[1024];
+	__shared__ bool sh_NeedsRefinement;
 
 	block.sync();
 
@@ -373,6 +380,7 @@ void rasterizePatches_32x32(Patch* patches, uint32_t* numPatches, uint64_t* fram
 		block.sync();
 		if(block.thread_rank() == 0){
 			sh_patchIndex = atomicAdd(&processedPatches, 1);
+			sh_NeedsRefinement = false;
 		}
 		block.sync();
 
@@ -408,6 +416,12 @@ void rasterizePatches_32x32(Patch* patches, uint32_t* numPatches, uint64_t* fram
 
 		int inx = index_t + (index_tx < 31 ?  1 :  -1);
 		int iny = index_t + (index_ty < 31 ? 32 : -32);
+		int inxy = index_t;
+		if(index_tx < 31) inxy += 1;
+		if(index_ty < 31) inxy += 32;
+
+		// int dx = (index_tx < 31 ?  0 :  -1);
+		// int dy = (index_ty < 31 ?  0 : -32);
 
 		float3 pnx = {sh_samples[3 * inx + 0], sh_samples[3 * inx + 1], sh_samples[3 * inx + 2]};
 		float3 pny = {sh_samples[3 * iny + 0], sh_samples[3 * iny + 1], sh_samples[3 * iny + 2]};
@@ -418,6 +432,31 @@ void rasterizePatches_32x32(Patch* patches, uint32_t* numPatches, uint64_t* fram
 
 		float4 ps = toScreen(p, uniforms);
 
+		uint32_t pixelPos; 
+		int16_t* pixelPos_u16 = (int16_t*)&pixelPos;
+		pixelPos_u16[0] = int(ps.x);
+		pixelPos_u16[1] = int(ps.y);
+		sh_pixelPositions[index_t] = pixelPos;
+
+		block.sync();
+
+		// compute distances to next samples in x, y, or both directions
+		uint32_t pp_00 = sh_pixelPositions[index_t];
+		uint32_t pp_10 = sh_pixelPositions[inx];
+		uint32_t pp_01 = sh_pixelPositions[iny];
+		// uint32_t pp_11 = sh_pixelPositions[inxy];
+		int16_t* pp_00_u16 = (int16_t*)&pp_00;
+		int16_t* pp_10_u16 = (int16_t*)&pp_10;
+		int16_t* pp_01_u16 = (int16_t*)&pp_01;
+		// int16_t* pp_11_u16 = (int16_t*)&pp_11;
+
+		// the max distance
+		int d_max_10 = max(abs(pp_10_u16[0] - pp_00_u16[0]), abs(pp_10_u16[1] - pp_00_u16[1]));
+		int d_max_01 = max(abs(pp_01_u16[0] - pp_00_u16[0]), abs(pp_01_u16[1] - pp_00_u16[1]));
+		// int d_max_11 = max(abs(pp_11_u16[0] - pp_00_u16[0]), abs(pp_11_u16[1] - pp_00_u16[1]));
+		// int d_max = max(max(d_max_10, d_max_01), d_max_11);
+		int d_max = max(d_max_10, d_max_01);
+
 		uint32_t color = 0;
 		// uint32_t color = patch.dbg * 12345678;
 		uint8_t* rgba = (uint8_t*)&color;
@@ -426,12 +465,60 @@ void rasterizePatches_32x32(Patch* patches, uint32_t* numPatches, uint64_t* fram
 		rgba[2] = 200.0 * N.z;
 		rgba[3] = 255;
 
+		// mark samples where distances to next samples are >1px
+		if(index_tx < 31 && index_ty < 31)
+		if(d_max > 1){
+			// color = 0x00ff00ff;
+			sh_NeedsRefinement = true;
+		}
+
+		block.sync();
+
+		// if(sh_NeedsRefinement){
+		// 	color = 0x0000ffff;
+		// }
+
+		if(!createNewPatches){
+			color = 0x000000ff;
+		}
+
 		// color = (patch.x + 1) * (patch.y + 13) * 1234567;
 
 		// drawSprite(ps, framebuffer, color, uniforms);
+
+		// if(N.x > 10.0)
 		drawPoint(ps, framebuffer, color, uniforms);
 
 		block.sync();
+
+		if(createNewPatches)
+		if(sh_NeedsRefinement && block.thread_rank() == 0){
+
+			uint32_t newPatchIndex = atomicAdd(numNewPatches, 4);
+
+			float s_center = (patch.s_min + patch.s_max) * 0.5;
+			float t_center = (patch.t_min + patch.t_max) * 0.5;
+
+			newPatches[newPatchIndex + 0] = {
+				patch.s_min, s_center,
+				patch.t_min, t_center
+			};
+
+			newPatches[newPatchIndex + 1] = {
+				s_center, patch.s_max,
+				patch.t_min, t_center
+			};
+
+			newPatches[newPatchIndex + 2] = {
+				patch.s_min, s_center,
+				t_center, patch.t_max
+			};
+
+			newPatches[newPatchIndex + 3] = {
+				s_center, patch.s_max,
+				t_center, patch.t_max
+			};
+		}
 	}
 }
 
@@ -512,8 +599,6 @@ void kernel_generate_patches(
 	auto grid = cg::this_grid();
 	auto block = cg::this_thread_block();
 
-	asm volatile("mov.u64 %0, %%globaltimer;" : "=l"(nanotime_start));
-
 	uniforms = _uniforms;
 
 	Allocator _allocator(buffer, 0);
@@ -533,6 +618,8 @@ void kernel_generate_patches(
 	}else if(uniforms.method == METHOD_RUNNIN_THRU){
 		threshold = 64;
 	}
+
+	// threshold = 70;
 
 	generatePatches2(patches, numPatches, threshold, uniforms, stats);
 }
@@ -563,12 +650,46 @@ void kernel_rasterize_patches_32x32(
 		framebuffer[pixelIndex] = (uint64_t(Infinity) << 32ull) | uint64_t(BACKGROUND_COLOR);
 	});
 
+	Patch* newPatches = allocator->alloc<Patch*>(MAX_PATCHES * sizeof(Patch));
+	uint32_t* numNewPatches = allocator->alloc<uint32_t*>(4);
+
+	grid.sync();
+
+	if(grid.thread_rank() == 0){
+		*numNewPatches = 0;
+	}
+
 	grid.sync();
 
 	uint64_t t_00 = nanotime();
 
-	rasterizePatches_32x32(patches, numPatches, framebuffer, uniforms);
+	rasterizePatches_32x32(
+		patches, numPatches, 
+		framebuffer, 
+		uniforms,
+		newPatches, numNewPatches, true
+	);
 	grid.sync();
+
+	// *numPatches = 0;
+
+	grid.sync();
+
+	if(uniforms.enableRefinement){
+		// the earlier call to rasterizePatches checked for holes and created
+		// a refined list of patches. render them now. 
+		rasterizePatches_32x32(
+			newPatches, numNewPatches, 
+			framebuffer, 
+			uniforms,
+			patches, numPatches, false
+		);
+		grid.sync();
+	}
+
+	// if(grid.thread_rank() == 0){
+	// 	printf("*numNewPatches: %i \n", *numNewPatches);
+	// }
 
 	uint64_t t_20 = nanotime();
 

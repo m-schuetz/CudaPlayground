@@ -23,8 +23,11 @@
 using namespace std;
 
 struct{
-	int method = METHOD_32X32;
-	int model = MODEL_FUNKY_PLANE;
+	int method                = METHOD_32X32;
+	int model                 = MODEL_FUNKY_PLANE;
+	bool isPaused             = false;
+	bool enableRefinement     = false;
+	double timeSinceLastFrame = 0.0;
 } settings;
 
 CUdeviceptr cptr_buffer;
@@ -72,14 +75,20 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 
 	cuEventRecord(cevent_start, 0);
 
-	float time = now();
+	static float time = 0;
+
+	if(!settings.isPaused){
+		time += settings.timeSinceLastFrame;
+	}
 
 	Uniforms uniforms;
 	uniforms.width = renderer->width;
 	uniforms.height = renderer->height;
-	uniforms.time = now();
+	uniforms.time = time;
 	uniforms.method = settings.method;
 	uniforms.model = settings.model;
+	uniforms.isPaused = settings.isPaused;
+	uniforms.enableRefinement = settings.enableRefinement;
 
 	glm::mat4 rotX = glm::rotate(glm::mat4(), 3.1415f * 0.5f, glm::vec3(1.0, 0.0, 0.0));
 
@@ -236,7 +245,10 @@ int main(){
 
 
 	auto update = [&](){
-		
+		static double lastFrameTime = now();
+		settings.timeSinceLastFrame = now() - lastFrameTime;
+
+		lastFrameTime = now();
 	};
 
 	auto render = [&](){
@@ -341,6 +353,13 @@ int main(){
 			ImGui::SetNextWindowSize(ImVec2(490, 230));
 
 			ImGui::Begin("Settings");
+
+			string label = settings.isPaused ? "Resume" : "Pause";
+			if (ImGui::Button(label.c_str())){
+				settings.isPaused = !settings.isPaused;
+			}
+
+			ImGui::Checkbox("Enable Refinement",     &settings.enableRefinement);
 
 			ImGui::Text("Method:");
 			ImGui::RadioButton("32x32", &settings.method, METHOD_32X32);

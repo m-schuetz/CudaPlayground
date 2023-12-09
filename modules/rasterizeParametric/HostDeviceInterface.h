@@ -111,6 +111,8 @@ struct Uniforms{
 	mat4 transform;
 	int method;
 	int model;
+	bool isPaused;
+	bool enableRefinement;
 };
 
 struct Stats{
