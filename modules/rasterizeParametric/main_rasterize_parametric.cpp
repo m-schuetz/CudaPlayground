@@ -117,29 +117,10 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 		&output_surf, &cptr_stats
 	};
 
-	{
-		int workgroupSize = 256;
-		int numGroups;
-		resultcode = cuOccupancyMaxActiveBlocksPerMultiprocessor(&numGroups, cuda_program->kernels["kernel_generate_patches"], workgroupSize, 0);
-		numGroups *= numSMs;
-		numGroups = std::clamp(numGroups, 10, 100'000);
-
-		auto res_launch = cuLaunchCooperativeKernel(cuda_program->kernels["kernel_generate_patches"],
-			numGroups, 1, 1,
-			workgroupSize, 1, 1,
-			0, 0, args);
-
-		if(res_launch != CUDA_SUCCESS){
-			const char* str; 
-			cuGetErrorString(res_launch, &str);
-			printf("error: %s \n", str);
-		}
-	}
-
-	if(settings.method == METHOD_32X32){
+	if(settings.method == METHOD_SAMPLEPERF_TEST){
 		int workgroupSize = 1024;
 		int numGroups;
-		auto& kernel = cuda_program->kernels["kernel_rasterize_patches_32x32"];
+		auto& kernel = cuda_program->kernels["kernel_sampleperf_test"];
 		resultcode = cuOccupancyMaxActiveBlocksPerMultiprocessor(&numGroups, kernel, workgroupSize, 0);
 		numGroups *= numSMs;
 		numGroups = std::clamp(numGroups, 10, 100'000);
@@ -154,23 +135,63 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 			cuGetErrorString(res_launch, &str);
 			printf("error: %s \n", str);
 		}
-	}else if(settings.method == METHOD_RUNNIN_THRU){
-		int workgroupSize = 128;
-		int numGroups;
-		auto& kernel = cuda_program->kernels["kernel_rasterize_patches_runnin_thru"];
-		resultcode = cuOccupancyMaxActiveBlocksPerMultiprocessor(&numGroups, kernel, workgroupSize, 0);
-		numGroups *= numSMs;
-		numGroups = std::clamp(numGroups, 10, 100'000);
-		
-		auto res_launch = cuLaunchCooperativeKernel(kernel,
-			numGroups, 1, 1,
-			workgroupSize, 1, 1,
-			0, 0, args);
+	}else{
 
-		if(res_launch != CUDA_SUCCESS){
-			const char* str; 
-			cuGetErrorString(res_launch, &str);
-			printf("error: %s \n", str);
+		{ // GENERATE PATCHES
+			int workgroupSize = 256;
+			int numGroups;
+			resultcode = cuOccupancyMaxActiveBlocksPerMultiprocessor(&numGroups, cuda_program->kernels["kernel_generate_patches"], workgroupSize, 0);
+			numGroups *= numSMs;
+			numGroups = std::clamp(numGroups, 10, 100'000);
+
+			auto res_launch = cuLaunchCooperativeKernel(cuda_program->kernels["kernel_generate_patches"],
+				numGroups, 1, 1,
+				workgroupSize, 1, 1,
+				0, 0, args);
+
+			if(res_launch != CUDA_SUCCESS){
+				const char* str; 
+				cuGetErrorString(res_launch, &str);
+				printf("error: %s \n", str);
+			}
+		}
+
+		if(settings.method == METHOD_32X32){
+			int workgroupSize = 1024;
+			int numGroups;
+			auto& kernel = cuda_program->kernels["kernel_rasterize_patches_32x32"];
+			resultcode = cuOccupancyMaxActiveBlocksPerMultiprocessor(&numGroups, kernel, workgroupSize, 0);
+			numGroups *= numSMs;
+			numGroups = std::clamp(numGroups, 10, 100'000);
+			
+			auto res_launch = cuLaunchCooperativeKernel(kernel,
+				numGroups, 1, 1,
+				workgroupSize, 1, 1,
+				0, 0, args);
+
+			if(res_launch != CUDA_SUCCESS){
+				const char* str; 
+				cuGetErrorString(res_launch, &str);
+				printf("error: %s \n", str);
+			}
+		}else if(settings.method == METHOD_RUNNIN_THRU){
+			int workgroupSize = 128;
+			int numGroups;
+			auto& kernel = cuda_program->kernels["kernel_rasterize_patches_runnin_thru"];
+			resultcode = cuOccupancyMaxActiveBlocksPerMultiprocessor(&numGroups, kernel, workgroupSize, 0);
+			numGroups *= numSMs;
+			numGroups = std::clamp(numGroups, 10, 100'000);
+			
+			auto res_launch = cuLaunchCooperativeKernel(kernel,
+				numGroups, 1, 1,
+				workgroupSize, 1, 1,
+				0, 0, args);
+
+			if(res_launch != CUDA_SUCCESS){
+				const char* str; 
+				cuGetErrorString(res_launch, &str);
+				printf("error: %s \n", str);
+			}
 		}
 	}
 
@@ -208,6 +229,7 @@ void initCudaProgram(shared_ptr<GLRenderer> renderer){
 			"./modules/rasterizeParametric/utils.cu",
 		},
 		.kernels = {
+			"kernel_sampleperf_test",
 			"kernel_generate_patches", 
 			"kernel_rasterize_patches_32x32",
 			"kernel_rasterize_patches_runnin_thru"
@@ -362,6 +384,7 @@ int main(){
 			ImGui::Checkbox("Enable Refinement",     &settings.enableRefinement);
 
 			ImGui::Text("Method:");
+			ImGui::RadioButton("sampleperf test (100M samples)", &settings.method, METHOD_SAMPLEPERF_TEST);
 			ImGui::RadioButton("32x32", &settings.method, METHOD_32X32);
 			ImGui::RadioButton("128 runnin thru", &settings.method, METHOD_RUNNIN_THRU);
 

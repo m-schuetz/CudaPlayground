@@ -96,6 +96,7 @@ int SAMPLEMODE_LINEAR      = 1;
 
 int METHOD_32X32           = 0;
 int METHOD_RUNNIN_THRU     = 1;
+int METHOD_SAMPLEPERF_TEST = 2;
 
 int MODEL_PLANE                  = 0;
 int MODEL_FUNKY_PLANE            = 1;

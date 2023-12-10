@@ -1,10 +1,10 @@
 {
 	"workbench.editor.enablePreview": false,
 	"files.associations": {
-		"*.cs": "cpp",
-		"*.wgsl": "cpp",
 		"*.vs": "cpp",
 		"*.fs": "cpp",
+		"*.wgsl": "cpp",
+		"*.cs": "cpp",
 		"cmath": "cpp",
 		"unordered_map": "cpp",
 		"chrono": "cpp",
@@ -91,7 +91,8 @@
 		"hash_map": "cpp",
 		"__config": "cpp",
 		"ranges": "cpp",
-		"span": "cpp"
+		"span": "cpp",
+		"bitset": "cpp"
 	},
 	"files.trimTrailingWhitespace": false,
 	"editor.fontSize": 20,

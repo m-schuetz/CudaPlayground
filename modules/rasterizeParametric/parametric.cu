@@ -12,6 +12,7 @@ constexpr int MAX_PATCHES = 1'000'000;
 
 namespace cg = cooperative_groups;
 
+// constexpr float uniformTime = 0.0;
 Uniforms uniforms;
 Allocator* allocator;
 
@@ -66,8 +67,8 @@ void drawPoint(float4 coord, uint64_t* framebuffer, uint32_t color, Uniforms& un
 	int x = coord.x;
 	int y = coord.y;
 
-	if(x > 1 && x < uniforms.width  - 2.0)
-	if(y > 1 && y < uniforms.height - 2.0){
+	if(x > 1 && x < uniforms.width  - 2.0f)
+	if(y > 1 && y < uniforms.height - 2.0f){
 
 		// SINGLE PIXEL
 		uint32_t pixelID = x + int(uniforms.width) * y;
@@ -83,8 +84,8 @@ void drawSprite(float4 coord, uint64_t* framebuffer, uint32_t color, Uniforms& u
 	int x = coord.x;
 	int y = coord.y;
 
-	if(x > 1 && x < uniforms.width  - 2.0)
-	if(y > 1 && y < uniforms.height - 2.0){
+	if(x > 1 && x < uniforms.width  - 2.0f)
+	if(y > 1 && y < uniforms.height - 2.0f){
 
 		// POINT SPRITE
 		for(int ox : {-2, -1, 0, 1, 2})
@@ -99,14 +100,14 @@ void drawSprite(float4 coord, uint64_t* framebuffer, uint32_t color, Uniforms& u
 }
 
 auto toScreen = [&](float3 p, Uniforms& uniforms){
-	float4 ndc = uniforms.transform * float4{p.x, p.y, p.z, 1.0};
+	float4 ndc = uniforms.transform * float4{p.x, p.y, p.z, 1.0f};
 
 	ndc.x = ndc.x / ndc.w;
 	ndc.y = ndc.y / ndc.w;
 	ndc.z = ndc.z / ndc.w;
 
-	ndc.x = (ndc.x * 0.5 + 0.5) * uniforms.width;
-	ndc.y = (ndc.y * 0.5 + 0.5) * uniforms.height;
+	ndc.x = (ndc.x * 0.5f + 0.5f) * uniforms.width;
+	ndc.y = (ndc.y * 0.5f + 0.5f) * uniforms.height;
 	// ndc.z = (ndc.z * 0.5 + 0.5) * uniforms.width;
 
 	return ndc;
@@ -115,8 +116,8 @@ auto toScreen = [&](float3 p, Uniforms& uniforms){
 // s, t in range 0 to 1!
 float3 sampleSphere(float s, float t){
 
-	float u = 2.0 * 3.14 * s;
-	float v = 3.14 * t;
+	float u = 2.0f * 3.14f * s;
+	float v = 3.14f * t;
 	
 	float3 xyz = {
 		cos(u) * sin(v),
@@ -129,26 +130,29 @@ float3 sampleSphere(float s, float t){
 
 // s, t in range 0 to 1!
 float3 samplePlane(float s, float t){
-	return float3{2.0 * s - 1.0, 0.0, 2.0 * t - 1.0};
+	return float3{2.0f * s - 1.0f, 0.0f, 2.0f * t - 1.0f};
 };
 
 float3 sampleSinCos(float s, float t){
 
-	float scale = 10.0;
-	float height = 0.105;
-
+	float scale = 10.0f;
+	float height = 0.105f;
 
 	float time = uniforms.time;
-	float su = s - 0.5;
-	float tu = t - 0.5;
+	// float time = 123.0;
+	float su = s - 0.5f;
+	float tu = t - 0.5f;
+	// float su = 1.0;
+	// float tu = 1.0;
 	float d = (su * su + tu * tu);
 
-	float z = height * sin(scale * s + time) * cos(scale * t + time) + cos(2.0 * time) * 10.0 * height * exp(-1000.0 * d);
-
+	// NOTE: It's very important for perf to explicitly specify float literals (e.g. 2.0f)
+	float z = height * sin(scale * s + time) * cos(scale * t + time) 
+	          + cos(2.0f * time) * 10.0f * height * exp(-1000.0f * d);
 	return float3{
-		2.0 * (-s + 0.5), 
+		2.0f * (-s + 0.5f), 
 		z, 
-		2.0 * (-t + 0.5)
+		2.0f * (-t + 0.5f)
 	};
 };
 
@@ -270,8 +274,8 @@ void generatePatches2(Patch* patches, uint32_t* numPatches, int threshold, Unifo
 				// too large, subdivide
 				uint32_t targetIndex = atomicAdd(targetCounter, 4);
 
-				float s_center = (patch.s_min + patch.s_max) / 2.0;
-				float t_center = (patch.t_min + patch.t_max) / 2.0;
+				float s_center = (patch.s_min + patch.s_max) / 2.0f;
+				float t_center = (patch.t_min + patch.t_max) / 2.0f;
 
 				Patch patch_00;
 				patch_00.s_min = patch.s_min;
@@ -401,8 +405,8 @@ void rasterizePatches_32x32(
 		float uts = float(index_tx) / 32.0f;
 		float vts = float(index_ty) / 32.0f;
 
-		float s = (1.0 - uts) * s_min + uts * s_max;
-		float t = (1.0 - vts) * t_min + vts * t_max;
+		float s = (1.0f - uts) * s_min + uts * s_max;
+		float t = (1.0f - vts) * t_min + vts * t_max;
 
 		float3 p = sample(s, t);
 
@@ -460,9 +464,9 @@ void rasterizePatches_32x32(
 		uint32_t color = 0;
 		// uint32_t color = patch.dbg * 12345678;
 		uint8_t* rgba = (uint8_t*)&color;
-		rgba[0] = 200.0 * N.x;
-		rgba[1] = 200.0 * N.y;
-		rgba[2] = 200.0 * N.z;
+		rgba[0] = 200.0f * N.x;
+		rgba[1] = 200.0f * N.y;
+		rgba[2] = 200.0f * N.z;
 		rgba[3] = 255;
 
 		// mark samples where distances to next samples are >1px
@@ -496,8 +500,8 @@ void rasterizePatches_32x32(
 
 			uint32_t newPatchIndex = atomicAdd(numNewPatches, 4);
 
-			float s_center = (patch.s_min + patch.s_max) * 0.5;
-			float t_center = (patch.t_min + patch.t_max) * 0.5;
+			float s_center = (patch.s_min + patch.s_max) * 0.5f;
+			float t_center = (patch.t_min + patch.t_max) * 0.5f;
 
 			newPatches[newPatchIndex + 0] = {
 				patch.s_min, s_center,
@@ -561,21 +565,21 @@ void rasterizePatches_runnin_thru(Patch* patches, uint32_t* numPatches, uint64_t
 		int index_t = block.thread_rank();
 		float ut = float(index_t) / float(block.num_threads());
 
-		float s = (1.0 - ut) * s_min + ut * s_max;
+		float s = (1.0f - ut) * s_min + ut * s_max;
 		float t = t_min;
 
 		
-		float steps = 64.0;
+		float steps = 64.0f;
 		for(float i = 0.0f; i < steps; i = i + 1.0f){
 			float vt = i / steps;
-			float t = (1.0 - vt) * t_min + vt * t_max;
+			float t = (1.0f - vt) * t_min + vt * t_max;
 
 			float3 p = sample(s, t);
 			uint32_t color = 0x000000ff;
 			float4 ps = toScreen(p, uniforms);
 
 
-			color = 1234567.0 * (123.0 + patch.s_min * patch.t_min);
+			color = 1234567.0f * (123.0f + patch.s_min * patch.t_min);
 
 			drawPoint(ps, framebuffer, color, uniforms);
 
@@ -622,6 +626,91 @@ void kernel_generate_patches(
 	// threshold = 70;
 
 	generatePatches2(patches, numPatches, threshold, uniforms, stats);
+}
+
+extern "C" __global__
+void kernel_sampleperf_test(
+	const Uniforms _uniforms,
+	unsigned int* buffer,
+	Patch* patches, uint32_t* numPatches,
+	cudaSurfaceObject_t gl_colorbuffer,
+	Stats* stats
+){
+	auto grid = cg::this_grid();
+	auto block = cg::this_thread_block();
+
+	uniforms = _uniforms;
+
+	Allocator _allocator(buffer, 0);
+	allocator = &_allocator;
+
+	// allocate framebuffer memory
+	int framebufferSize = int(uniforms.width) * int(uniforms.height) * sizeof(uint64_t);
+	uint64_t* framebuffer = allocator->alloc<uint64_t*>(framebufferSize);
+
+	// clear framebuffer
+	processRange(0, uniforms.width * uniforms.height, [&](int pixelIndex){
+		// framebuffer[pixelIndex] = 0x7f800000'00332211ull;
+		framebuffer[pixelIndex] = (uint64_t(Infinity) << 32ull) | uint64_t(0x00ff00ff);
+		// framebuffer[pixelIndex] = (uint64_t(Infinity) << 32ull) | uint64_t(BACKGROUND_COLOR);
+	});
+
+
+	uint64_t t_00 = nanotime();
+
+	grid.sync();
+
+
+	auto sampler = getSampler(uniforms.model);
+	int gridSize = 10'000; // 100M
+	int numPixels = int(uniforms.width * uniforms.height);
+
+	processRange(gridSize * gridSize, [&](int index){
+
+		uint32_t ix = index % gridSize;
+		uint32_t iy = index / gridSize;
+
+		float s = float(ix) / float(gridSize);
+		float t = float(iy) / float(gridSize);
+
+		float3 sample = sampler(s, t);
+
+
+		if(sample.x * sample.y == 123.0f){
+
+			int pixelID = int(sample.x * sample.y * 1234.0f) % numPixels;
+			framebuffer[10'000] = (uint64_t(Infinity) << 32ull) | uint64_t(BACKGROUND_COLOR);
+		}
+
+	});
+
+	grid.sync();
+
+
+
+	uint64_t t_20 = nanotime();
+
+	if(grid.thread_rank() == 0 && (stats->frameID % 100) == 0){
+		stats->time_1 = float((t_20 - t_00) / 1000llu) / 1000.0f;
+	}
+
+
+	// transfer framebuffer to opengl texture
+	processRange(0, uniforms.width * uniforms.height, [&](int pixelIndex){
+
+		int x = pixelIndex % int(uniforms.width);
+		int y = pixelIndex / int(uniforms.width);
+
+		uint64_t encoded = framebuffer[pixelIndex];
+		uint32_t color = encoded & 0xffffffffull;
+
+		surf2Dwrite(color, gl_colorbuffer, x * 4, y);
+	});
+
+	if(grid.thread_rank() == 0){
+		stats->frameID++;
+	}
+	
 }
 
 extern "C" __global__
