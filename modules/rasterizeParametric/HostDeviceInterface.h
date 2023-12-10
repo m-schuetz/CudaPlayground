@@ -100,7 +100,8 @@ int METHOD_SAMPLEPERF_TEST = 2;
 
 int MODEL_PLANE                  = 0;
 int MODEL_FUNKY_PLANE            = 1;
-int MODEL_SPHERE                 = 2;
+int MODEL_EXTRA_FUNKY_PLANE      = 2;
+int MODEL_SPHERE                 = 3;
 
 struct Uniforms{
 	float width;

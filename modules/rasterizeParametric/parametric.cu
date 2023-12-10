@@ -133,7 +133,7 @@ float3 samplePlane(float s, float t){
 	return float3{2.0f * s - 1.0f, 0.0f, 2.0f * t - 1.0f};
 };
 
-float3 sampleSinCos(float s, float t){
+float3 sampleFunkyPlane(float s, float t){
 
 	float scale = 10.0f;
 	float height = 0.105f;
@@ -149,6 +149,32 @@ float3 sampleSinCos(float s, float t){
 	// NOTE: It's very important for perf to explicitly specify float literals (e.g. 2.0f)
 	float z = height * sin(scale * s + time) * cos(scale * t + time) 
 	          + cos(2.0f * time) * 10.0f * height * exp(-1000.0f * d);
+
+	return float3{
+		2.0f * (-s + 0.5f), 
+		z, 
+		2.0f * (-t + 0.5f)
+	};
+};
+
+float3 sampleExtraFunkyPlane(float s, float t){
+
+	float scale = 10.0f;
+	float height = 0.105f;
+
+	float time = uniforms.time;
+	// float time = 123.0;
+	float su = s - 0.5f;
+	float tu = t - 0.5f;
+	// float su = 1.0;
+	// float tu = 1.0;
+	float d = (su * su + tu * tu);
+
+	// NOTE: It's very important for perf to explicitly specify float literals (e.g. 2.0f)
+	float z = height * sin(scale * s + time) * cos(scale * t + time) 
+	    + cos(2.0f * time) * 10.0f * height * exp(-1000.0f * d)
+	    + 0.015f * sin(50.0f * scale * s) * cos(50.0f * scale * t);
+
 	return float3{
 		2.0f * (-s + 0.5f), 
 		z, 
@@ -161,7 +187,9 @@ float3 sampleSinCos(float s, float t){
 
 auto getSampler(int model){
 	if(model == MODEL_FUNKY_PLANE){
-		return sampleSinCos;
+		return sampleFunkyPlane;
+	}else if(model == MODEL_EXTRA_FUNKY_PLANE){
+		return sampleExtraFunkyPlane;
 	}else if(model == MODEL_SPHERE){
 		return sampleSphere;
 	}else{
@@ -209,10 +237,10 @@ void generatePatches2(Patch* patches, uint32_t* numPatches, int threshold, Unifo
 	// 	printf("target.counter: %llu \n", pingpong[2].counter);
 
 	Patch root;
-	root.s_min = 0;
-	root.s_max = 1;
-	root.t_min = 0;
-	root.t_max = 1;
+	root.s_min = 0.0f;
+	root.s_max = 1.0f;
+	root.t_min = 0.0f;
+	root.t_max = 1.0f;
 
 	patches_tmp_0[0] = root;
 	*numPatches_tmp_0 = 1;
@@ -227,8 +255,8 @@ void generatePatches2(Patch* patches, uint32_t* numPatches, int threshold, Unifo
 		processRange(*sourceCounter, [&](int index){
 			Patch patch = source[index];
 
-			float s_c = (patch.s_min + patch.s_max) * 0.5;
-			float t_c = (patch.t_min + patch.t_max) * 0.5;
+			float s_c = (patch.s_min + patch.s_max) * 0.5f;
+			float t_c = (patch.t_min + patch.t_max) * 0.5f;
 
 			float3 p_00 = sample(patch.s_min, patch.t_min);
 			float3 p_01 = sample(patch.s_min, patch.t_max);
@@ -608,6 +636,8 @@ void kernel_generate_patches(
 	Allocator _allocator(buffer, 0);
 	allocator = &_allocator;
 
+	uint64_t t_00 = nanotime();
+
 	grid.sync();
 	if(grid.thread_rank() == 0){
 		*numPatches = 0;
@@ -626,6 +656,15 @@ void kernel_generate_patches(
 	// threshold = 70;
 
 	generatePatches2(patches, numPatches, threshold, uniforms, stats);
+
+	grid.sync();
+
+	uint64_t t_20 = nanotime();
+
+	if(grid.thread_rank() == 0 && (stats->frameID % 100) == 0){
+		stats->time_0 = float((t_20 - t_00) / 1000llu) / 1000.0f;
+	}
+
 }
 
 extern "C" __global__
@@ -691,7 +730,8 @@ void kernel_sampleperf_test(
 	uint64_t t_20 = nanotime();
 
 	if(grid.thread_rank() == 0 && (stats->frameID % 100) == 0){
-		stats->time_1 = float((t_20 - t_00) / 1000llu) / 1000.0f;
+		stats->time_0 = float((t_20 - t_00) / 1000llu) / 1000.0f;
+		stats->time_1 = 0.0;
 	}
 
 

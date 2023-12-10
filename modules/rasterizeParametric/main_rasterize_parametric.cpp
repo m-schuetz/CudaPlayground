@@ -391,6 +391,7 @@ int main(){
 			ImGui::Text("Model:");
 			ImGui::RadioButton("Plane", &settings.model, MODEL_PLANE);
 			ImGui::RadioButton("Funky Plane", &settings.model, MODEL_FUNKY_PLANE);
+			ImGui::RadioButton("Extra Funky Plane", &settings.model, MODEL_EXTRA_FUNKY_PLANE);
 			ImGui::RadioButton("Sphere", &settings.model, MODEL_SPHERE);
 
 			ImGui::End();
