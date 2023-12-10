@@ -28,9 +28,16 @@ struct{
 	bool isPaused             = false;
 	bool enableRefinement     = false;
 	double timeSinceLastFrame = 0.0;
+	bool lockFrustum          = false;
 } settings;
 
+float duration_scene;
+float duration_patches;
+float duration_rasterization;
+
 CUdeviceptr cptr_buffer;
+CUdeviceptr cptr_framebuffer;
+CUdeviceptr cptr_models, cptr_numModels;
 CUdeviceptr cptr_patches, cptr_numPatches;
 CUdeviceptr cptr_stats;
 
@@ -40,7 +47,9 @@ void* h_stats_pinned = nullptr;
 CUgraphicsResource cugl_colorbuffer;
 CudaModularProgram* cuda_program = nullptr;
 // CudaModularProgram* cuda_program_generate_patches = nullptr;
-CUevent cevent_start, cevent_end;
+CUevent cevent_start_scene, cevent_end_scene;
+CUevent cevent_start_patches, cevent_end_patches;
+CUevent cevent_start_rasterization, cevent_end_rasterization;
 
 void initCuda(){
 	cuInit(0);
@@ -73,7 +82,7 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 	CUsurfObject output_surf;
 	cuSurfObjectCreate(&output_surf, &res_desc);
 
-	cuEventRecord(cevent_start, 0);
+	// cuEventRecord(cevent_start, 0);
 
 	static float time = 0;
 
@@ -89,21 +98,34 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 	uniforms.model = settings.model;
 	uniforms.isPaused = settings.isPaused;
 	uniforms.enableRefinement = settings.enableRefinement;
+	uniforms.lockFrustum = settings.lockFrustum;
 
 	glm::mat4 rotX = glm::rotate(glm::mat4(), 3.1415f * 0.5f, glm::vec3(1.0, 0.0, 0.0));
+
+	static glm::mat4 locked_view;
+	static glm::mat4 locked_transform;
 
 	glm::mat4 world = rotX;
 	glm::mat4 view = renderer->camera->view;
 	glm::mat4 proj = renderer->camera->proj;
 	glm::mat4 worldViewProj = proj * view * world;
+
 	world = glm::transpose(world);
 	view = glm::transpose(view);
 	proj = glm::transpose(proj);
 	worldViewProj = glm::transpose(worldViewProj);
+
+	if(!settings.lockFrustum){
+		locked_view = view;
+		locked_transform = worldViewProj;
+	}
+
 	memcpy(&uniforms.world, &world, sizeof(world));
 	memcpy(&uniforms.view, &view, sizeof(view));
 	memcpy(&uniforms.proj, &proj, sizeof(proj));
 	memcpy(&uniforms.transform, &worldViewProj, sizeof(worldViewProj));
+	memcpy(&uniforms.locked_view, &locked_view, sizeof(locked_view));
+	memcpy(&uniforms.locked_transform, &locked_transform, sizeof(locked_transform));
 
 	float values[16];
 	memcpy(&values, &worldViewProj, sizeof(worldViewProj));
@@ -112,10 +134,32 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 	memcpy(&stats, h_stats_pinned, sizeof(Stats));
 
 
-	void* args[] = {
-		&uniforms, &cptr_buffer, &cptr_patches, &cptr_numPatches, 
-		&output_surf, &cptr_stats
-	};
+	{ // CLEAR FRAMEBUFFER
+		int workgroupSize = 1024;
+		int numGroups;
+		auto& kernel = cuda_program->kernels["kernel_clear_framebuffer"];
+		resultcode = cuOccupancyMaxActiveBlocksPerMultiprocessor(&numGroups, kernel, workgroupSize, 0);
+		numGroups *= numSMs;
+		numGroups = std::clamp(numGroups, 10, 100'000);
+
+		void* args[] = {
+			&uniforms, &cptr_buffer, &cptr_framebuffer,
+			&cptr_models, &cptr_numModels, 
+			&cptr_patches, &cptr_numPatches, 
+			&output_surf, &cptr_stats
+		};
+		
+		auto res_launch = cuLaunchCooperativeKernel(kernel,
+			numGroups, 1, 1,
+			workgroupSize, 1, 1,
+			0, 0, args);
+
+		if(res_launch != CUDA_SUCCESS){
+			const char* str; 
+			cuGetErrorString(res_launch, &str);
+			printf("error: %s \n", str);
+		}
+	}
 
 	if(settings.method == METHOD_SAMPLEPERF_TEST){
 		int workgroupSize = 1024;
@@ -124,6 +168,13 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 		resultcode = cuOccupancyMaxActiveBlocksPerMultiprocessor(&numGroups, kernel, workgroupSize, 0);
 		numGroups *= numSMs;
 		numGroups = std::clamp(numGroups, 10, 100'000);
+
+		void* args[] = {
+			&uniforms, &cptr_buffer, &cptr_framebuffer, 
+			&cptr_models, &cptr_numModels, 
+			&cptr_patches, &cptr_numPatches, 
+			&output_surf, &cptr_stats
+		};
 		
 		auto res_launch = cuLaunchCooperativeKernel(kernel,
 			numGroups, 1, 1,
@@ -137,14 +188,24 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 		}
 	}else{
 
-		{ // GENERATE PATCHES
+		{ // GENERATE SCENE
+			cuEventRecord(cevent_start_scene, 0);
+
 			int workgroupSize = 256;
 			int numGroups;
-			resultcode = cuOccupancyMaxActiveBlocksPerMultiprocessor(&numGroups, cuda_program->kernels["kernel_generate_patches"], workgroupSize, 0);
+			auto& kernel = cuda_program->kernels["kernel_generate_scene"];
+			resultcode = cuOccupancyMaxActiveBlocksPerMultiprocessor(&numGroups, kernel, workgroupSize, 0);
 			numGroups *= numSMs;
 			numGroups = std::clamp(numGroups, 10, 100'000);
 
-			auto res_launch = cuLaunchCooperativeKernel(cuda_program->kernels["kernel_generate_patches"],
+			void* args[] = {
+				&uniforms, &cptr_buffer, 
+				&cptr_models, &cptr_numModels, 
+				&cptr_patches, &cptr_numPatches, 
+				&output_surf, &cptr_stats
+			};
+
+			auto res_launch = cuLaunchCooperativeKernel(kernel,
 				numGroups, 1, 1,
 				workgroupSize, 1, 1,
 				0, 0, args);
@@ -154,7 +215,42 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 				cuGetErrorString(res_launch, &str);
 				printf("error: %s \n", str);
 			}
+
+			cuEventRecord(cevent_end_scene, 0);
 		}
+
+		{ // GENERATE PATCHES
+			cuEventRecord(cevent_start_patches, 0);
+
+			int workgroupSize = 256;
+			int numGroups;
+			auto& kernel = cuda_program->kernels["kernel_generate_patches"];
+			resultcode = cuOccupancyMaxActiveBlocksPerMultiprocessor(&numGroups, kernel, workgroupSize, 0);
+			numGroups *= numSMs;
+			numGroups = std::clamp(numGroups, 10, 100'000);
+
+			void* args[] = {
+				&uniforms, &cptr_buffer, 
+				&cptr_models, &cptr_numModels, 
+				&cptr_patches, &cptr_numPatches, 
+				&output_surf, &cptr_stats
+			};
+
+			auto res_launch = cuLaunchCooperativeKernel(kernel,
+				numGroups, 1, 1,
+				workgroupSize, 1, 1,
+				0, 0, args);
+
+			if(res_launch != CUDA_SUCCESS){
+				const char* str; 
+				cuGetErrorString(res_launch, &str);
+				printf("error: %s \n", str);
+			}
+
+			cuEventRecord(cevent_end_patches, 0);
+		}
+
+		cuEventRecord(cevent_start_rasterization, 0);
 
 		if(settings.method == METHOD_32X32){
 			int workgroupSize = 1024;
@@ -163,6 +259,13 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 			resultcode = cuOccupancyMaxActiveBlocksPerMultiprocessor(&numGroups, kernel, workgroupSize, 0);
 			numGroups *= numSMs;
 			numGroups = std::clamp(numGroups, 10, 100'000);
+
+			void* args[] = {
+				&uniforms, &cptr_buffer, &cptr_framebuffer,
+				&cptr_models, &cptr_numModels, 
+				&cptr_patches, &cptr_numPatches, 
+				&output_surf, &cptr_stats
+			};
 			
 			auto res_launch = cuLaunchCooperativeKernel(kernel,
 				numGroups, 1, 1,
@@ -181,6 +284,13 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 			resultcode = cuOccupancyMaxActiveBlocksPerMultiprocessor(&numGroups, kernel, workgroupSize, 0);
 			numGroups *= numSMs;
 			numGroups = std::clamp(numGroups, 10, 100'000);
+
+			void* args[] = {
+				&uniforms, &cptr_buffer, &cptr_framebuffer,
+				&cptr_models, &cptr_numModels, 
+				&cptr_patches, &cptr_numPatches, 
+				&output_surf, &cptr_stats
+			};
 			
 			auto res_launch = cuLaunchCooperativeKernel(kernel,
 				numGroups, 1, 1,
@@ -193,20 +303,43 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 				printf("error: %s \n", str);
 			}
 		}
+
+		cuEventRecord(cevent_end_rasterization, 0);
+
 	}
 
-	cuEventRecord(cevent_end, 0);
-	// cuEventSynchronize(cevent_end);
+	{ // TRANSFER FRAMEBUFFER TO OPENGL TEXTURE
+		int workgroupSize = 1024;
+		int numGroups;
+		auto& kernel = cuda_program->kernels["kernel_framebuffer_to_OpenGL"];
+		resultcode = cuOccupancyMaxActiveBlocksPerMultiprocessor(&numGroups, kernel, workgroupSize, 0);
+		numGroups *= numSMs;
+		numGroups = std::clamp(numGroups, 10, 100'000);
 
-	// {
-	// 	float total_ms;
-	// 	cuEventElapsedTime(&total_ms, cevent_start, cevent_end);
+		void* args[] = {
+			&uniforms, &cptr_buffer, &cptr_framebuffer,
+			&cptr_models, &cptr_numModels, 
+			&cptr_patches, &cptr_numPatches, 
+			&output_surf, &cptr_stats
+		};
+		
+		auto res_launch = cuLaunchCooperativeKernel(kernel,
+			numGroups, 1, 1,
+			workgroupSize, 1, 1,
+			0, 0, args);
 
-	// 	cout << "CUDA durations: " << endl;
-	// 	cout << std::format("total:     {:6.1f} ms", total_ms) << endl;
-	// }
+		if(res_launch != CUDA_SUCCESS){
+			const char* str; 
+			cuGetErrorString(res_launch, &str);
+			printf("error: %s \n", str);
+		}
+	}
 
 	cuCtxSynchronize();
+
+	cuEventElapsedTime(&duration_scene, cevent_start_scene, cevent_end_scene);
+	cuEventElapsedTime(&duration_patches, cevent_start_patches, cevent_end_patches);
+	cuEventElapsedTime(&duration_rasterization, cevent_start_rasterization, cevent_end_rasterization);
 
 	cuSurfObjectDestroy(output_surf);
 	cuGraphicsUnmapResources(dynamic_resources.size(), dynamic_resources.data(), ((CUstream)CU_STREAM_DEFAULT));
@@ -217,7 +350,10 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 
 void initCudaProgram(shared_ptr<GLRenderer> renderer){
 	cuMemAlloc(&cptr_buffer, 500'000'000);
+	cuMemAlloc(&cptr_framebuffer, 512'000'000); // up to 8000x8000 pixels
+	cuMemAlloc(&cptr_models, 10'000'000);
 	cuMemAlloc(&cptr_patches, 500'000'000);
+	cuMemAlloc(&cptr_numModels, 8);
 	cuMemAlloc(&cptr_numPatches, 8);
 
 	cuMemAlloc(&cptr_stats, sizeof(Stats));
@@ -230,21 +366,22 @@ void initCudaProgram(shared_ptr<GLRenderer> renderer){
 		},
 		.kernels = {
 			"kernel_sampleperf_test",
+			"kernel_generate_scene", 
 			"kernel_generate_patches", 
 			"kernel_rasterize_patches_32x32",
-			"kernel_rasterize_patches_runnin_thru"
+			"kernel_rasterize_patches_runnin_thru",
+			"kernel_clear_framebuffer",
+			"kernel_framebuffer_to_OpenGL",
+			"kernel_test"
 		}
 	});
-	// cuda_program_generate_patches = new CudaModularProgram({
-	// 	.modules = {
-	// 		"./modules/rasterizeParametric/generate_patches.cu",
-	// 		"./modules/rasterizeParametric/utils.cu",
-	// 	},
-	// 	.kernels = {"kernel"}
-	// });
 
-	cuEventCreate(&cevent_start, 0);
-	cuEventCreate(&cevent_end, 0);
+	cuEventCreate(&cevent_start_scene, 0);
+	cuEventCreate(&cevent_end_scene, 0);
+	cuEventCreate(&cevent_start_patches, 0);
+	cuEventCreate(&cevent_end_patches, 0);
+	cuEventCreate(&cevent_start_rasterization, 0);
+	cuEventCreate(&cevent_end_rasterization, 0);
 
 	cuGraphicsGLRegisterImage(&cugl_colorbuffer, renderer->view.framebuffer->colorAttachments[0]->handle, GL_TEXTURE_2D, CU_GRAPHICS_REGISTER_FLAGS_WRITE_DISCARD);
 }
@@ -324,9 +461,13 @@ int main(){
 			};
 
 			vector<vector<string>> table = {
-				{"time 0  ", toMS(stats.time_0)       , format("{:.1f}", stats.time_0)},
-				{"time 1", toMS(stats.time_1)       , format("{:.1f}", stats.time_1)},
-				{"time 2", toMS(stats.time_2)       , format("{:.1f}", stats.time_2)},
+				{"Durations "             , "", ""},
+				{"    generate scene"     , toMS(duration_scene)           , format("{:.1f}", duration_scene)},
+				{"    generate patches"   , toMS(duration_patches)         , format("{:.1f}", duration_patches)},
+				{"    rasterize patches"  , toMS(duration_rasterization)   , format("{:.1f}", duration_rasterization)},
+				// {"time 0  ", toMS(stats.time_0)       , format("{:.1f}", stats.time_0)},
+				// {"time 1", toMS(stats.time_1)       , format("{:.1f}", stats.time_1)},
+				// {"time 2", toMS(stats.time_2)       , format("{:.1f}", stats.time_2)},
 			};
 
 			for(int i = 0; i < 14; i++){
@@ -382,6 +523,7 @@ int main(){
 			}
 
 			ImGui::Checkbox("Enable Refinement",     &settings.enableRefinement);
+			ImGui::Checkbox("lock frustum",          &settings.lockFrustum);
 
 			ImGui::Text("Method:");
 			ImGui::RadioButton("sampleperf test (100M samples)", &settings.method, METHOD_SAMPLEPERF_TEST);

@@ -107,14 +107,20 @@ struct Uniforms{
 	float width;
 	float height;
 	float time;
+	
 	mat4 world;
 	mat4 view;
 	mat4 proj;
 	mat4 transform;
+
+	mat4 locked_view;
+	mat4 locked_transform;
+
 	int method;
 	int model;
 	bool isPaused;
 	bool enableRefinement;
+	bool lockFrustum;
 };
 
 struct Stats{

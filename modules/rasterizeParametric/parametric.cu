@@ -19,11 +19,17 @@ Allocator* allocator;
 constexpr float PI = 3.1415;
 constexpr uint32_t BACKGROUND_COLOR = 0x00332211ull;
 
+struct Model{
+	int functionID;
+	float3 position;
+};
+
 struct Patch{
 	float s_min;
 	float s_max;
 	float t_min;
 	float t_max;
+	int modelID;
 };
 
 float4 operator*(const mat4& a, const float4& b){
@@ -108,7 +114,19 @@ auto toScreen = [&](float3 p, Uniforms& uniforms){
 
 	ndc.x = (ndc.x * 0.5f + 0.5f) * uniforms.width;
 	ndc.y = (ndc.y * 0.5f + 0.5f) * uniforms.height;
-	// ndc.z = (ndc.z * 0.5 + 0.5) * uniforms.width;
+
+	return ndc;
+};
+
+auto toScreen_locked = [&](float3 p, Uniforms& uniforms){
+	float4 ndc = uniforms.locked_transform * float4{p.x, p.y, p.z, 1.0f};
+
+	ndc.x = ndc.x / ndc.w;
+	ndc.y = ndc.y / ndc.w;
+	ndc.z = ndc.z / ndc.w;
+
+	ndc.x = (ndc.x * 0.5f + 0.5f) * uniforms.width;
+	ndc.y = (ndc.y * 0.5f + 0.5f) * uniforms.height;
 
 	return ndc;
 };
@@ -173,7 +191,7 @@ float3 sampleExtraFunkyPlane(float s, float t){
 	// NOTE: It's very important for perf to explicitly specify float literals (e.g. 2.0f)
 	float z = height * sin(scale * s + time) * cos(scale * t + time) 
 	    + cos(2.0f * time) * 10.0f * height * exp(-1000.0f * d)
-	    + 0.015f * sin(50.0f * scale * s) * cos(50.0f * scale * t);
+	    + 0.002f * sin(2.0f * PI * 300.0f * s) * cos(2.0f * PI * 300.0f * t);
 
 	return float3{
 		2.0f * (-s + 0.5f), 
@@ -197,15 +215,19 @@ auto getSampler(int model){
 	}
 };
 
-void generatePatches2(Patch* patches, uint32_t* numPatches, int threshold, Uniforms& uniforms, Stats* stats){
+void generatePatches2(
+	Model* models, uint32_t* numModels, 
+	Patch* patches, uint32_t* numPatches, 
+	int threshold, 
+	Uniforms& uniforms, 
+	Stats* stats
+){
 
 	auto grid = cg::this_grid();
 
 	if(grid.thread_rank() < 30){
 		stats->numPatches[grid.thread_rank()] = 0;
 	}
-
-	auto sample = getSampler(uniforms.model);
 	
 	Patch* patches_finished = allocator->alloc<Patch*>(MAX_PATCHES * sizeof(Patch));
 	Patch* patches_tmp_0 = allocator->alloc<Patch*>(MAX_PATCHES * sizeof(Patch));
@@ -233,17 +255,30 @@ void generatePatches2(Patch* patches, uint32_t* numPatches, int threshold, Unifo
 
 	grid.sync();
 
-	// if(grid.thread_rank() == 0) 
-	// 	printf("target.counter: %llu \n", pingpong[2].counter);
+	// Create initial set of patches
+	constexpr int initialPatchGridSize = 8;
 
-	Patch root;
-	root.s_min = 0.0f;
-	root.s_max = 1.0f;
-	root.t_min = 0.0f;
-	root.t_max = 1.0f;
+	for(int modelID = 0; modelID < *numModels; modelID++){
+		if(grid.thread_rank() < initialPatchGridSize * initialPatchGridSize){
 
-	patches_tmp_0[0] = root;
-	*numPatches_tmp_0 = 1;
+			int index = grid.thread_rank();
+			int ix = index % initialPatchGridSize;
+			int iy = index / initialPatchGridSize;
+
+			float s_min = float(ix + 0) / float(initialPatchGridSize);
+			float s_max = float(ix + 1) / float(initialPatchGridSize);
+			float t_min = float(iy + 0) / float(initialPatchGridSize);
+			float t_max = float(iy + 1) / float(initialPatchGridSize);
+
+			Patch patch = {s_min, s_max, t_min, t_max, modelID};
+
+			patches_tmp_0[modelID * initialPatchGridSize * initialPatchGridSize + index] = patch;
+		}
+	}
+
+	*numPatches_tmp_0 = *numModels * initialPatchGridSize * initialPatchGridSize;
+
+	grid.sync();
 
 	int level = 0;
 
@@ -258,11 +293,14 @@ void generatePatches2(Patch* patches, uint32_t* numPatches, int threshold, Unifo
 			float s_c = (patch.s_min + patch.s_max) * 0.5f;
 			float t_c = (patch.t_min + patch.t_max) * 0.5f;
 
-			float3 p_00 = sample(patch.s_min, patch.t_min);
-			float3 p_01 = sample(patch.s_min, patch.t_max);
-			float3 p_10 = sample(patch.s_max, patch.t_min);
-			float3 p_11 = sample(patch.s_max, patch.t_max);
-			float3 p_c = sample(s_c, t_c);
+			Model model = models[patch.modelID];
+			auto sample = getSampler(model.functionID);
+
+			float3 p_00 = sample(patch.s_min, patch.t_min) + model.position;
+			float3 p_01 = sample(patch.s_min, patch.t_max) + model.position;
+			float3 p_10 = sample(patch.s_max, patch.t_min) + model.position;
+			float3 p_11 = sample(patch.s_max, patch.t_max) + model.position;
+			float3 p_c = sample(s_c, t_c) + model.position;
 
 
 			float3 nodeMin = {
@@ -275,17 +313,17 @@ void generatePatches2(Patch* patches, uint32_t* numPatches, int threshold, Unifo
 				max(max(max(p_00.y, p_01.y), max(p_10.y, p_11.y)), p_c.y),
 				max(max(max(p_00.z, p_01.z), max(p_10.z, p_11.z)), p_c.z),
 			};
-			bool isIntersectingFrustum = intersectsFrustum(uniforms.transform, nodeMin, nodeMax);
+			bool isIntersectingFrustum = intersectsFrustum(uniforms.locked_transform, nodeMin, nodeMax);
 
 			if(!isIntersectingFrustum){
 				return;
 			}
 
-			float4 ps_00 = toScreen(p_00, uniforms);
-			float4 ps_01 = toScreen(p_01, uniforms);
-			float4 ps_10 = toScreen(p_10, uniforms);
-			float4 ps_11 = toScreen(p_11, uniforms);
-			float4 ps_c = toScreen(p_c, uniforms);
+			float4 ps_00 = toScreen_locked(p_00, uniforms);
+			float4 ps_01 = toScreen_locked(p_01, uniforms);
+			float4 ps_10 = toScreen_locked(p_10, uniforms);
+			float4 ps_11 = toScreen_locked(p_11, uniforms);
+			float4 ps_c = toScreen_locked(p_c, uniforms);
 
 			float min_x = min(min(min(ps_00.x, ps_01.x), min(ps_10.x, ps_11.x)), ps_c.x);
 			float min_y = min(min(min(ps_00.y, ps_01.y), min(ps_10.y, ps_11.y)), ps_c.y);
@@ -302,37 +340,20 @@ void generatePatches2(Patch* patches, uint32_t* numPatches, int threshold, Unifo
 				// too large, subdivide
 				uint32_t targetIndex = atomicAdd(targetCounter, 4);
 
+				if(targetIndex >= MAX_PATCHES) return;
+
 				float s_center = (patch.s_min + patch.s_max) / 2.0f;
 				float t_center = (patch.t_min + patch.t_max) / 2.0f;
 
-				Patch patch_00;
-				patch_00.s_min = patch.s_min;
-				patch_00.s_max = s_center;
-				patch_00.t_min = patch.t_min;
-				patch_00.t_max = t_center;
+				Patch patch_00 = {patch.s_min, s_center, patch.t_min, t_center, patch.modelID};
+				Patch patch_01 = {patch.s_min, s_center, t_center, patch.t_max, patch.modelID};
+				Patch patch_10 = {s_center, patch.s_max, patch.t_min, t_center, patch.modelID};
+				Patch patch_11 = {s_center, patch.s_max, t_center, patch.t_max, patch.modelID};
+
 				target[targetIndex + 0] = patch_00;
-
-				Patch patch_01;
-				patch_01.s_min = patch.s_min;
-				patch_01.s_max = s_center;
-				patch_01.t_min = t_center;
-				patch_01.t_max = patch.t_max;
 				target[targetIndex + 1] = patch_01;
-
-				Patch patch_10;
-				patch_10.s_min = s_center;
-				patch_10.s_max = patch.s_max;
-				patch_10.t_min = patch.t_min;
-				patch_10.t_max = t_center;
 				target[targetIndex + 2] = patch_10;
-
-				Patch patch_11;
-				patch_11.s_min = s_center;
-				patch_11.s_max = patch.s_max;
-				patch_11.t_min = t_center;
-				patch_11.t_max = patch.t_max;
 				target[targetIndex + 3] = patch_11;
-
 
 			}else{
 
@@ -346,6 +367,9 @@ void generatePatches2(Patch* patches, uint32_t* numPatches, int threshold, Unifo
 
 				// small enough, add to final list
 				uint32_t targetIndex = atomicAdd(numPatches, 1);
+
+				if(targetIndex >= MAX_PATCHES) return;
+
 				patches[targetIndex] = patch;
 
 				atomicAdd(&stats->numPatches[level], 1);
@@ -375,12 +399,16 @@ void generatePatches2(Patch* patches, uint32_t* numPatches, int threshold, Unifo
 
 		grid.sync();
 
+		*target.counter = min(*target.counter, MAX_PATCHES);
+		*numPatches = min(*numPatches, MAX_PATCHES);
+
 		level++;
 	}
 
 }
 
 void rasterizePatches_32x32(
+	Model* models, uint32_t* numModels,
 	Patch* patches, uint32_t* numPatches, 
 	uint64_t* framebuffer, 
 	Uniforms& uniforms,
@@ -396,8 +424,6 @@ void rasterizePatches_32x32(
 		processedPatches = 0;
 	}
 
-	auto sample = getSampler(uniforms.model);
-
 	__shared__ int sh_patchIndex;
 	__shared__ float sh_samples[1024 * 3];
 	__shared__ int sh_pixelPositions[1024];
@@ -408,7 +434,7 @@ void rasterizePatches_32x32(
 	int loop_max = 10'000;
 	for(int loop_i = 0; loop_i < loop_max; loop_i++){
 
-		// grab the index of the next unprocessed triangle
+		// grab the index of the next unprocessed patch
 		block.sync();
 		if(block.thread_rank() == 0){
 			sh_patchIndex = atomicAdd(&processedPatches, 1);
@@ -419,6 +445,9 @@ void rasterizePatches_32x32(
 		if(sh_patchIndex >= *numPatches) break;
 
 		Patch patch = patches[sh_patchIndex];
+		Model model = models[patch.modelID];
+
+		auto sample = getSampler(model.functionID);
 
 		float s_min = patch.s_min;
 		float s_max = patch.s_max;
@@ -436,7 +465,7 @@ void rasterizePatches_32x32(
 		float s = (1.0f - uts) * s_min + uts * s_max;
 		float t = (1.0f - vts) * t_min + vts * t_max;
 
-		float3 p = sample(s, t);
+		float3 p = sample(s, t) + model.position;
 
 		block.sync();
 
@@ -528,33 +557,48 @@ void rasterizePatches_32x32(
 
 			uint32_t newPatchIndex = atomicAdd(numNewPatches, 4);
 
-			float s_center = (patch.s_min + patch.s_max) * 0.5f;
-			float t_center = (patch.t_min + patch.t_max) * 0.5f;
+			if(newPatchIndex >= MAX_PATCHES){
+				atomicSub(numNewPatches, 4);
+				continue;
+			}
+
+			// marked as volatile to reduce register pressure and allow larger workgroup size
+			volatile float s_center = (patch.s_min + patch.s_max) * 0.5f;
+			volatile float t_center = (patch.t_min + patch.t_max) * 0.5f;
 
 			newPatches[newPatchIndex + 0] = {
 				patch.s_min, s_center,
-				patch.t_min, t_center
+				patch.t_min, t_center, 
+				patch.modelID
 			};
 
 			newPatches[newPatchIndex + 1] = {
 				s_center, patch.s_max,
-				patch.t_min, t_center
+				patch.t_min, t_center,
+				patch.modelID
 			};
 
 			newPatches[newPatchIndex + 2] = {
 				patch.s_min, s_center,
-				t_center, patch.t_max
+				t_center, patch.t_max,
+				patch.modelID
 			};
 
 			newPatches[newPatchIndex + 3] = {
 				s_center, patch.s_max,
-				t_center, patch.t_max
+				t_center, patch.t_max,
+				patch.modelID
 			};
 		}
 	}
 }
 
-void rasterizePatches_runnin_thru(Patch* patches, uint32_t* numPatches, uint64_t* framebuffer, Uniforms& uniforms){
+void rasterizePatches_runnin_thru(
+	Model* models, uint32_t* numModels,
+	Patch* patches, uint32_t* numPatches,
+	uint64_t* framebuffer, 
+	Uniforms& uniforms
+){
 
 	auto grid = cg::this_grid();
 	auto block = cg::this_thread_block();
@@ -563,8 +607,6 @@ void rasterizePatches_runnin_thru(Patch* patches, uint32_t* numPatches, uint64_t
 	if(grid.thread_rank() == 0){
 		processedPatches = 0;
 	}
-
-	auto sample = getSampler(uniforms.model);
 
 	__shared__ int sh_patchIndex;
 	__shared__ float sh_samples[1024 * 3];
@@ -584,6 +626,8 @@ void rasterizePatches_runnin_thru(Patch* patches, uint32_t* numPatches, uint64_t
 		if(sh_patchIndex >= *numPatches) break;
 
 		Patch patch = patches[sh_patchIndex];
+		Model model = models[patch.modelID];
+		auto sample = getSampler(uniforms.model);
 
 		float s_min = patch.s_min;
 		float s_max = patch.s_max;
@@ -602,7 +646,7 @@ void rasterizePatches_runnin_thru(Patch* patches, uint32_t* numPatches, uint64_t
 			float vt = i / steps;
 			float t = (1.0f - vt) * t_min + vt * t_max;
 
-			float3 p = sample(s, t);
+			float3 p = sample(s, t) + model.position;
 			uint32_t color = 0x000000ff;
 			float4 ps = toScreen(p, uniforms);
 
@@ -621,9 +665,43 @@ void rasterizePatches_runnin_thru(Patch* patches, uint32_t* numPatches, uint64_t
 }
 
 extern "C" __global__
+void kernel_generate_scene(
+	const Uniforms _uniforms,
+	unsigned int* buffer,
+	Model* models, uint32_t* numModels,
+	Patch* patches, uint32_t* numPatches,
+	cudaSurfaceObject_t gl_colorbuffer,
+	Stats* stats
+){
+	auto grid = cg::this_grid();
+	auto block = cg::this_thread_block();
+
+	uniforms = _uniforms;
+
+	if(grid.thread_rank() == 0){
+
+		models[0] = {uniforms.model, float3{ 2.1, 0.0, -2.1}};
+		models[1] = {uniforms.model, float3{ 0.0, 0.0, -2.1}};
+		models[2] = {uniforms.model, float3{-2.1, 0.0, -2.1}};
+
+		models[3] = {uniforms.model, float3{ 2.1, 0.0, 0.0}};
+		models[4] = {uniforms.model, float3{ 0.0, 0.0, 0.0}};
+		models[5] = {uniforms.model, float3{-2.1, 0.0, 0.0}};
+
+		models[6] = {uniforms.model, float3{ 2.1, 0.0, 2.1}};
+		models[7] = {uniforms.model, float3{ 0.0, 0.0, 2.1}};
+		models[8] = {uniforms.model, float3{-2.1, 0.0, 2.1}};
+
+		*numModels = 9;
+	}
+
+}
+
+extern "C" __global__
 void kernel_generate_patches(
 	const Uniforms _uniforms,
 	unsigned int* buffer,
+	Model* models, uint32_t* numModels,
 	Patch* patches, uint32_t* numPatches,
 	cudaSurfaceObject_t gl_colorbuffer,
 	Stats* stats
@@ -655,7 +733,14 @@ void kernel_generate_patches(
 
 	// threshold = 70;
 
-	generatePatches2(patches, numPatches, threshold, uniforms, stats);
+	// if(grid.thread_rank() == 0){
+	// 	Model model = models[0];
+		
+	// 	printf("model.functionID: %i \n", model.functionID);
+	// 	printf("numModels: %i \n", *numModels);
+	// }
+
+	generatePatches2(models, numModels, patches, numPatches, threshold, uniforms, stats);
 
 	grid.sync();
 
@@ -671,6 +756,8 @@ extern "C" __global__
 void kernel_sampleperf_test(
 	const Uniforms _uniforms,
 	unsigned int* buffer,
+	uint64_t* framebuffer,
+	Model* models, uint32_t* numModels,
 	Patch* patches, uint32_t* numPatches,
 	cudaSurfaceObject_t gl_colorbuffer,
 	Stats* stats
@@ -682,18 +769,6 @@ void kernel_sampleperf_test(
 
 	Allocator _allocator(buffer, 0);
 	allocator = &_allocator;
-
-	// allocate framebuffer memory
-	int framebufferSize = int(uniforms.width) * int(uniforms.height) * sizeof(uint64_t);
-	uint64_t* framebuffer = allocator->alloc<uint64_t*>(framebufferSize);
-
-	// clear framebuffer
-	processRange(0, uniforms.width * uniforms.height, [&](int pixelIndex){
-		// framebuffer[pixelIndex] = 0x7f800000'00332211ull;
-		framebuffer[pixelIndex] = (uint64_t(Infinity) << 32ull) | uint64_t(0x00ff00ff);
-		// framebuffer[pixelIndex] = (uint64_t(Infinity) << 32ull) | uint64_t(BACKGROUND_COLOR);
-	});
-
 
 	uint64_t t_00 = nanotime();
 
@@ -734,12 +809,46 @@ void kernel_sampleperf_test(
 		stats->time_1 = 0.0;
 	}
 
+}
+
+extern "C" __global__
+void kernel_clear_framebuffer(
+	const Uniforms _uniforms,
+	unsigned int* buffer,
+	uint64_t* framebuffer,
+	Model* models, uint32_t* numModels,
+	Patch* patches, uint32_t* numPatches,
+	cudaSurfaceObject_t gl_colorbuffer,
+	Stats* stats
+){
+
+	auto grid = cg::this_grid();
+
+	processRange(0, _uniforms.width * _uniforms.height, [&](int pixelIndex){
+		// framebuffer[pixelIndex] = 0x7f800000'00332211ull;
+		framebuffer[pixelIndex] = (uint64_t(Infinity) << 32ull) | uint64_t(BACKGROUND_COLOR);
+	});
+
+}
+
+extern "C" __global__
+void kernel_framebuffer_to_OpenGL(
+	const Uniforms _uniforms,
+	unsigned int* buffer,
+	uint64_t* framebuffer,
+	Model* models, uint32_t* numModels,
+	Patch* patches, uint32_t* numPatches,
+	cudaSurfaceObject_t gl_colorbuffer,
+	Stats* stats
+){
+
+	auto grid = cg::this_grid();
 
 	// transfer framebuffer to opengl texture
-	processRange(0, uniforms.width * uniforms.height, [&](int pixelIndex){
+	processRange(0, _uniforms.width * _uniforms.height, [&](int pixelIndex){
 
-		int x = pixelIndex % int(uniforms.width);
-		int y = pixelIndex / int(uniforms.width);
+		int x = pixelIndex % int(_uniforms.width);
+		int y = pixelIndex / int(_uniforms.width);
 
 		uint64_t encoded = framebuffer[pixelIndex];
 		uint32_t color = encoded & 0xffffffffull;
@@ -750,13 +859,15 @@ void kernel_sampleperf_test(
 	if(grid.thread_rank() == 0){
 		stats->frameID++;
 	}
-	
+
 }
 
 extern "C" __global__
 void kernel_rasterize_patches_32x32(
 	const Uniforms _uniforms,
 	unsigned int* buffer,
+	uint64_t* framebuffer,
+	Model* models, uint32_t* numModels,
 	Patch* patches, uint32_t* numPatches,
 	cudaSurfaceObject_t gl_colorbuffer,
 	Stats* stats
@@ -769,15 +880,15 @@ void kernel_rasterize_patches_32x32(
 	uniforms = _uniforms;
 	allocator = &_allocator;
 
-	// allocate framebuffer memory
-	int framebufferSize = int(uniforms.width) * int(uniforms.height) * sizeof(uint64_t);
-	uint64_t* framebuffer = allocator->alloc<uint64_t*>(framebufferSize);
+	// // allocate framebuffer memory
+	// int framebufferSize = int(uniforms.width) * int(uniforms.height) * sizeof(uint64_t);
+	// uint64_t* framebuffer = allocator->alloc<uint64_t*>(framebufferSize);
 
-	// clear framebuffer
-	processRange(0, uniforms.width * uniforms.height, [&](int pixelIndex){
-		// framebuffer[pixelIndex] = 0x7f800000'00332211ull;
-		framebuffer[pixelIndex] = (uint64_t(Infinity) << 32ull) | uint64_t(BACKGROUND_COLOR);
-	});
+	// // clear framebuffer
+	// processRange(0, uniforms.width * uniforms.height, [&](int pixelIndex){
+	// 	// framebuffer[pixelIndex] = 0x7f800000'00332211ull;
+	// 	framebuffer[pixelIndex] = (uint64_t(Infinity) << 32ull) | uint64_t(BACKGROUND_COLOR);
+	// });
 
 	Patch* newPatches = allocator->alloc<Patch*>(MAX_PATCHES * sizeof(Patch));
 	uint32_t* numNewPatches = allocator->alloc<uint32_t*>(4);
@@ -790,9 +901,8 @@ void kernel_rasterize_patches_32x32(
 
 	grid.sync();
 
-	uint64_t t_00 = nanotime();
-
 	rasterizePatches_32x32(
+		models, numModels,
 		patches, numPatches, 
 		framebuffer, 
 		uniforms,
@@ -800,14 +910,11 @@ void kernel_rasterize_patches_32x32(
 	);
 	grid.sync();
 
-	// *numPatches = 0;
-
-	grid.sync();
-
 	if(uniforms.enableRefinement){
 		// the earlier call to rasterizePatches checked for holes and created
 		// a refined list of patches. render them now. 
 		rasterizePatches_32x32(
+			models, numModels,
 			newPatches, numNewPatches, 
 			framebuffer, 
 			uniforms,
@@ -816,33 +923,9 @@ void kernel_rasterize_patches_32x32(
 		grid.sync();
 	}
 
-	// if(grid.thread_rank() == 0){
-	// 	printf("*numNewPatches: %i \n", *numNewPatches);
-	// }
-
-	uint64_t t_20 = nanotime();
-
-	if(grid.thread_rank() == 0 && (stats->frameID % 100) == 0){
-		stats->time_1 = float((t_20 - t_00) / 1000llu) / 1000.0f;
-	}
-
 	grid.sync();
 
-	// transfer framebuffer to opengl texture
-	processRange(0, uniforms.width * uniforms.height, [&](int pixelIndex){
-
-		int x = pixelIndex % int(uniforms.width);
-		int y = pixelIndex / int(uniforms.width);
-
-		uint64_t encoded = framebuffer[pixelIndex];
-		uint32_t color = encoded & 0xffffffffull;
-
-		surf2Dwrite(color, gl_colorbuffer, x * 4, y);
-	});
-
-	if(grid.thread_rank() == 0){
-		stats->frameID++;
-	}
+	
 
 }
 
@@ -850,6 +933,8 @@ extern "C" __global__
 void kernel_rasterize_patches_runnin_thru(
 	const Uniforms _uniforms,
 	unsigned int* buffer,
+	uint64_t* framebuffer,
+	Model* models, uint32_t* numModels,
 	Patch* patches, uint32_t* numPatches,
 	cudaSurfaceObject_t gl_colorbuffer,
 	Stats* stats
@@ -862,21 +947,11 @@ void kernel_rasterize_patches_runnin_thru(
 	uniforms = _uniforms;
 	allocator = &_allocator;
 
-	// allocate framebuffer memory
-	int framebufferSize = int(uniforms.width) * int(uniforms.height) * sizeof(uint64_t);
-	uint64_t* framebuffer = allocator->alloc<uint64_t*>(framebufferSize);
-
-	// clear framebuffer
-	processRange(0, uniforms.width * uniforms.height, [&](int pixelIndex){
-		// framebuffer[pixelIndex] = 0x7f800000'00332211ull;
-		framebuffer[pixelIndex] = (uint64_t(Infinity) << 32ull) | uint64_t(BACKGROUND_COLOR);
-	});
-
 	grid.sync();
 
 	uint64_t t_00 = nanotime();
 
-	rasterizePatches_runnin_thru(patches, numPatches, framebuffer, uniforms);
+	rasterizePatches_runnin_thru(models, numModels, patches, numPatches, framebuffer, uniforms);
 	grid.sync();
 
 	uint64_t t_20 = nanotime();
@@ -885,22 +960,40 @@ void kernel_rasterize_patches_runnin_thru(
 		stats->time_1 = float((t_20 - t_00) / 1000llu) / 1000.0f;
 	}
 
-	grid.sync();
+}
 
-	// transfer framebuffer to opengl texture
-	processRange(0, uniforms.width * uniforms.height, [&](int pixelIndex){
+extern "C" __global__
+void kernel_test(
+	const Uniforms _uniforms,
+	unsigned int* buffer,
+	Model* models, uint32_t* numModels,
+	Patch* patches, uint32_t* numPatches,
+	cudaSurfaceObject_t gl_colorbuffer,
+	Stats* stats
+){
+	auto grid = cg::this_grid();
+	auto block = cg::this_thread_block();
 
-		int x = pixelIndex % int(uniforms.width);
-		int y = pixelIndex / int(uniforms.width);
 
-		uint64_t encoded = framebuffer[pixelIndex];
-		uint32_t color = encoded & 0xffffffffull;
+	uint32_t size = uniforms.width * uniforms.height;
+	uint32_t totalThreadCount = blockDim.x * gridDim.x;
+	int itemsPerThread = size / totalThreadCount + 1;
+
+	for(int i = 0; i < itemsPerThread; i++){
+		int block_offset  = itemsPerThread * blockIdx.x * blockDim.x;
+		int thread_offset = itemsPerThread * threadIdx.x;
+		int index = block_offset + thread_offset + i;
+
+		if(index >= size){
+			break;
+		}
+
+		int x = index % int(uniforms.width);
+		int y = index / int(uniforms.width);
+
+		uint32_t color = 0x00112233;
 
 		surf2Dwrite(color, gl_colorbuffer, x * 4, y);
-	});
-
-	if(grid.thread_rank() == 0){
-		stats->frameID++;
 	}
 
 }
