@@ -229,10 +229,8 @@ void generatePatches2(
 		stats->numPatches[grid.thread_rank()] = 0;
 	}
 	
-	Patch* patches_finished = allocator->alloc<Patch*>(MAX_PATCHES * sizeof(Patch));
 	Patch* patches_tmp_0 = allocator->alloc<Patch*>(MAX_PATCHES * sizeof(Patch));
 	Patch* patches_tmp_1 = allocator->alloc<Patch*>(MAX_PATCHES * sizeof(Patch));
-	uint32_t* numPatches_finished = allocator->alloc<uint32_t*>(4);
 	uint32_t* numPatches_tmp_0 = allocator->alloc<uint32_t*>(4);
 	uint32_t* numPatches_tmp_1 = allocator->alloc<uint32_t*>(4);
 
@@ -242,13 +240,10 @@ void generatePatches2(
 	};
 
 	PatchData* pingpong = allocator->alloc<PatchData*>(2 * sizeof(PatchData));
-	pingpong[0].patch = patches_tmp_0;
-	pingpong[0].counter = numPatches_tmp_0;
-	pingpong[1].patch = patches_tmp_1;
-	pingpong[1].counter = numPatches_tmp_1;
+	pingpong[0] = {patches_tmp_0, numPatches_tmp_0};
+	pingpong[1] = {patches_tmp_1, numPatches_tmp_1};
 
 	if(grid.thread_rank() == 0){
-		*numPatches_finished = 0;
 		*numPatches_tmp_0 = 0;
 		*numPatches_tmp_1 = 0;
 	}
@@ -285,6 +280,7 @@ void generatePatches2(
 	// SUBDIVIDE LARGE PATCHES
 	// - if too large, divide and store in target
 	// - if not too large, store in <patches>
+	// - too large as in pixel size
 	auto subdivide = [&](Patch* source, uint32_t* sourceCounter, Patch* target, uint32_t* targetCounter){
 
 		processRange(*sourceCounter, [&](int index){
@@ -334,10 +330,9 @@ void generatePatches2(
 			float s_y = max_y - min_y;
 			float area = s_x * s_y;
 
-			if(area > threshold * threshold)
-			// if(area > 64 * 64)
-			{
-				// too large, subdivide
+			if(area > threshold * threshold){
+				// too large, subdivide into 4 smaller patches
+
 				uint32_t targetIndex = atomicAdd(targetCounter, 4);
 
 				if(targetIndex >= MAX_PATCHES) return;
@@ -356,6 +351,10 @@ void generatePatches2(
 				target[targetIndex + 3] = patch_11;
 
 			}else{
+				// small enough, add to list of patches
+
+				// TODO: do backface culling here? 
+				// If the patch faces away from the camera, ignore it. 
 
 				// float3 t_01 = p_01 - p_00;
 				// float3 t_10 = p_10 - p_00;
@@ -365,7 +364,6 @@ void generatePatches2(
 				// float a = dot(N_v, float3{0.0, 0.0, 1.0});
 				// if(a < 0.0) return;
 
-				// small enough, add to final list
 				uint32_t targetIndex = atomicAdd(numPatches, 1);
 
 				if(targetIndex >= MAX_PATCHES) return;
@@ -407,6 +405,12 @@ void generatePatches2(
 
 }
 
+// Rasterize a patch by sampling a 32x32 grid.
+// - We launch with workgroup-size 1024, i.e., 32x32 threads
+// - Therefore we ca let each thread process one sample of the patch concurrently
+// - However, workgroup threads (unlike warp threads) don't operate simultaneously.
+//      - So in order to compute the normal, we compute samples and store the results in shared memory
+//      - Then we sync the group, and then each thread loads adjacent samples to compute the normal
 void rasterizePatches_32x32(
 	Model* models, uint32_t* numModels,
 	Patch* patches, uint32_t* numPatches, 
@@ -458,7 +462,6 @@ void rasterizePatches_32x32(
 		int index_tx = index_t % 32;
 		int index_ty = index_t / 32;
 
-
 		float uts = float(index_tx) / 32.0f;
 		float vts = float(index_ty) / 32.0f;
 
@@ -469,6 +472,7 @@ void rasterizePatches_32x32(
 
 		block.sync();
 
+		// Store samples in shared memory, so that other threads can access them
 		sh_samples[3 * index_t + 0] = p.x;
 		sh_samples[3 * index_t + 1] = p.y;
 		sh_samples[3 * index_t + 2] = p.z;
@@ -481,9 +485,7 @@ void rasterizePatches_32x32(
 		if(index_tx < 31) inxy += 1;
 		if(index_ty < 31) inxy += 32;
 
-		// int dx = (index_tx < 31 ?  0 :  -1);
-		// int dy = (index_ty < 31 ?  0 : -32);
-
+		// Lead adjacent samples (next-x and next-y) to compute normal
 		float3 pnx = {sh_samples[3 * inx + 0], sh_samples[3 * inx + 1], sh_samples[3 * inx + 2]};
 		float3 pny = {sh_samples[3 * iny + 0], sh_samples[3 * iny + 1], sh_samples[3 * iny + 2]};
 
@@ -493,6 +495,7 @@ void rasterizePatches_32x32(
 
 		float4 ps = toScreen(p, uniforms);
 
+		// Compute pixel positions and store them in shared memory so that ajdacent threads can access them
 		uint32_t pixelPos; 
 		int16_t* pixelPos_u16 = (int16_t*)&pixelPos;
 		pixelPos_u16[0] = int(ps.x);
@@ -501,21 +504,17 @@ void rasterizePatches_32x32(
 
 		block.sync();
 
-		// compute distances to next samples in x, y, or both directions
+		// compute pixel distances to next samples in x, y, or both directions
 		uint32_t pp_00 = sh_pixelPositions[index_t];
 		uint32_t pp_10 = sh_pixelPositions[inx];
 		uint32_t pp_01 = sh_pixelPositions[iny];
-		// uint32_t pp_11 = sh_pixelPositions[inxy];
 		int16_t* pp_00_u16 = (int16_t*)&pp_00;
 		int16_t* pp_10_u16 = (int16_t*)&pp_10;
 		int16_t* pp_01_u16 = (int16_t*)&pp_01;
-		// int16_t* pp_11_u16 = (int16_t*)&pp_11;
 
 		// the max distance
 		int d_max_10 = max(abs(pp_10_u16[0] - pp_00_u16[0]), abs(pp_10_u16[1] - pp_00_u16[1]));
 		int d_max_01 = max(abs(pp_01_u16[0] - pp_00_u16[0]), abs(pp_01_u16[1] - pp_00_u16[1]));
-		// int d_max_11 = max(abs(pp_11_u16[0] - pp_00_u16[0]), abs(pp_11_u16[1] - pp_00_u16[1]));
-		// int d_max = max(max(d_max_10, d_max_01), d_max_11);
 		int d_max = max(d_max_10, d_max_01);
 
 		uint32_t color = 0;
@@ -552,6 +551,7 @@ void rasterizePatches_32x32(
 
 		block.sync();
 
+		// If pixel distances are too large, create new patches to draw
 		if(createNewPatches)
 		if(sh_NeedsRefinement && block.thread_rank() == 0){
 
@@ -593,6 +593,10 @@ void rasterizePatches_32x32(
 	}
 }
 
+// Unlike the 32x32 method, this method draws the patch "line by line".
+// - We launch with 128 threads, which sample atx =threadID / 128.0 and y using the loop counter i. 
+// - No normals yet, but we could probably sample the first 2x128 samples and compute normals, 
+//   and then with each iteration next row of 128 samples and compute normals using previous 128 samples. 
 void rasterizePatches_runnin_thru(
 	Model* models, uint32_t* numModels,
 	Patch* patches, uint32_t* numPatches,
@@ -714,15 +718,11 @@ void kernel_generate_patches(
 	Allocator _allocator(buffer, 0);
 	allocator = &_allocator;
 
-	uint64_t t_00 = nanotime();
-
 	grid.sync();
 	if(grid.thread_rank() == 0){
 		*numPatches = 0;
 	}
 	grid.sync();
-
-	// generatePatches(patches, numPatches, uniforms);
 
 	int threshold = 32;
 	if(uniforms.method == METHOD_32X32){
@@ -731,27 +731,15 @@ void kernel_generate_patches(
 		threshold = 64;
 	}
 
-	// threshold = 70;
-
-	// if(grid.thread_rank() == 0){
-	// 	Model model = models[0];
-		
-	// 	printf("model.functionID: %i \n", model.functionID);
-	// 	printf("numModels: %i \n", *numModels);
-	// }
-
 	generatePatches2(models, numModels, patches, numPatches, threshold, uniforms, stats);
 
-	grid.sync();
-
-	uint64_t t_20 = nanotime();
-
-	if(grid.thread_rank() == 0 && (stats->frameID % 100) == 0){
-		stats->time_0 = float((t_20 - t_00) / 1000llu) / 1000.0f;
-	}
 
 }
 
+// Compute a whole lot of samples to check how many we can compute in a given time
+// - We don't write the results to screen because that takes time, but we need to 
+//   act as if we do so that the compiler doesn't optimize sample generation away.
+// - Simply do some if that virtually never evaluates to true, and draw only if it's true. 
 extern "C" __global__
 void kernel_sampleperf_test(
 	const Uniforms _uniforms,
@@ -789,9 +777,9 @@ void kernel_sampleperf_test(
 
 		float3 sample = sampler(s, t);
 
-
+		// Some bogus <if> that pretents to do something but virtually never evaluates to true,
+		// so that sampler(...) isn't optimized away.
 		if(sample.x * sample.y == 123.0f){
-
 			int pixelID = int(sample.x * sample.y * 1234.0f) % numPixels;
 			framebuffer[10'000] = (uint64_t(Infinity) << 32ull) | uint64_t(BACKGROUND_COLOR);
 		}
@@ -800,10 +788,9 @@ void kernel_sampleperf_test(
 
 	grid.sync();
 
-
-
 	uint64_t t_20 = nanotime();
 
+	// TODO: should do timings in host code with events.
 	if(grid.thread_rank() == 0 && (stats->frameID % 100) == 0){
 		stats->time_0 = float((t_20 - t_00) / 1000llu) / 1000.0f;
 		stats->time_1 = 0.0;
@@ -880,16 +867,6 @@ void kernel_rasterize_patches_32x32(
 	uniforms = _uniforms;
 	allocator = &_allocator;
 
-	// // allocate framebuffer memory
-	// int framebufferSize = int(uniforms.width) * int(uniforms.height) * sizeof(uint64_t);
-	// uint64_t* framebuffer = allocator->alloc<uint64_t*>(framebufferSize);
-
-	// // clear framebuffer
-	// processRange(0, uniforms.width * uniforms.height, [&](int pixelIndex){
-	// 	// framebuffer[pixelIndex] = 0x7f800000'00332211ull;
-	// 	framebuffer[pixelIndex] = (uint64_t(Infinity) << 32ull) | uint64_t(BACKGROUND_COLOR);
-	// });
-
 	Patch* newPatches = allocator->alloc<Patch*>(MAX_PATCHES * sizeof(Patch));
 	uint32_t* numNewPatches = allocator->alloc<uint32_t*>(4);
 
@@ -962,6 +939,7 @@ void kernel_rasterize_patches_runnin_thru(
 
 }
 
+// just some debugging. and checking how many registers a simple kernel utilizes.
 extern "C" __global__
 void kernel_test(
 	const Uniforms _uniforms,
