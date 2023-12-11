@@ -207,111 +207,114 @@ float3 sampleExtraFunkyPlane(float s, float t){
 
 float sinc(float x) /* Supporting sinc function */
 {
-    if (abs(x) < 1.0e-4)
-        return 1.0;
-    else
-        return (sin(x) / x);
+	if (abs(x) < 1.0e-4f)
+		return 1.0f;
+	else
+		return (sin(x) / x);
 }
 
 float factorial(int a_number)
 {
-    switch(a_number) {
-        case  0: return 1.0;
-        case  1: return 1.0;
-        case  2: return 2.0;
-        case  3: return 6.0;
-        case  4: return 24.0;
-        case  5: return 120.0;
-        case  6: return 720.0;
-        case  7: return 5040.0;
-        case  8: return 40320.0;
-        case  9: return 362880.0;
-        case 10: return 3628800.0;
-        case 11: return 39916800.0;
-        case 12: return 479001600.0;
-        case 13: return 6227020800.0;
-        case 14: return 87178291200.0;
-        case 15: return 1307674368000.0;
-        case 16: return 20922789888000.0;
-        case 17: return 355687428096000.0;
-        case 18: return 6402373705728000.0;
-        case 19: return 121645100408832000.0;
-        case 20: return 2432902008176640000.0;
-        case 21: return 51090942171709440000.0;
-        case 22: return 1124000727777607680000.0;
-        case 23: return 25852016738884976640000.0;
-        case 24: return 620448401733239439360000.0;
-        case 25: return 15511210043330985984000000.0;
-        case 26: return 403291461126605635584000000.0;
-        case 27: return 10888869450418352160768000000.0;
-        case 28: return 304888344611713860501504000000.0;
-        case 29: return 8841761993739701954543616000000.0;
-        case 30: return 265252859812191058636308480000000.0;
-        case 31: return 8222838654177922817725562880000000.0;
-        case 32: return 263130836933693530167218012160000000.0;
-        case 33: return 8683317618811886495518194401280000000.0;
-    }
-    return 0.0;
+	switch(a_number) {
+		case  0: return 1.0f;
+		case  1: return 1.0f;
+		case  2: return 2.0f;
+		case  3: return 6.0f;
+		case  4: return 24.0f;
+		case  5: return 120.0f;
+		case  6: return 720.0f;
+		case  7: return 5040.0f;
+		case  8: return 40320.0f;
+		case  9: return 362880.0f;
+		case 10: return 3628800.0f;
+		case 11: return 39916800.0f;
+		case 12: return 479001600.0f;
+		case 13: return 6227020800.0f;
+		case 14: return 87178291200.0f;
+		case 15: return 1307674368000.0f;
+		case 16: return 20922789888000.0f;
+		case 17: return 355687428096000.0f;
+		case 18: return 6402373705728000.0f;
+		case 19: return 121645100408832000.0f;
+		case 20: return 2432902008176640000.0f;
+		case 21: return 51090942171709440000.0f;
+		case 22: return 1124000727777607680000.0f;
+		case 23: return 25852016738884976640000.0f;
+		case 24: return 620448401733239439360000.0f;
+		case 25: return 15511210043330985984000000.0f;
+		case 26: return 403291461126605635584000000.0f;
+		case 27: return 10888869450418352160768000000.0f;
+		case 28: return 304888344611713860501504000000.0f;
+		case 29: return 8841761993739701954543616000000.0f;
+		case 30: return 265252859812191058636308480000000.0f;
+		case 31: return 8222838654177922817725562880000000.0f;
+		case 32: return 263130836933693530167218012160000000.0f;
+		case 33: return 8683317618811886495518194401280000000.0f;
+	}
+	return 0.0f;
 }
 
-float P(int l, int m, float x)
+float P(float l, float m, float x)
 {
-    // evaluate an Associated Legendre Polynomial P(l,m,x) at x
-    float pmm = 1.0;
-    if (m > 0) {
-        float somx2 = sqrt((1.0 - x)*(1.0 + x));
-        float fact = 1.0;
-        for (int i=1; i <= m; ++i) {
-            pmm *= (-fact) * somx2;
-            fact += 2.0;
-        }
-    }
-    
-    if (l == m) {
-        return pmm;
-    }
-    
-    float pmmp1 = x * float(2 * m + 1) * pmm;
-    
-    if (l == m + 1) {
-        return pmmp1;
-    }
-    
-    float pll = 0.0;
-    for (int ll = m+2; ll <= l; ++ll) {
-        pll = (float(2 * ll - 1) * x * pmmp1 - float(ll + m - 1)*pmm) / float(ll - m);
-        pmm = pmmp1;
-        pmmp1 = pll;
-    }
-    return pll;
+	// evaluate an Associated Legendre Polynomial P(l,m,x) at x
+	float pmm = 1.0f;
+
+	if (m > 0.0f) {
+		float somx2 = sqrt((1.0f - x)*(1.0f + x));
+		float fact = 1.0f;
+		for (float i = 1; i <= m; i = i + 1.0f) {
+			pmm *= (-fact) * somx2;
+			fact += 2.0f;
+		}
+	}
+
+	if (l == m) {
+		return pmm;
+	}
+
+	float pmmp1 = x * float(2.0f * m + 1.0f) * pmm;
+
+	if (l == m + 1.0f) {
+		return pmmp1;
+	}
+
+	float pll = 0.0f;
+	for (float ll = m + 2.0f; ll <= l; ll = ll + 1.0f) {
+		pll = (float(2.0f * ll - 1.0f) * x * pmmp1 - float(ll + m - 1.0f)*pmm) / float(ll - m);
+		pmm = pmmp1;
+		pmmp1 = pll;
+	}
+
+	return pll;
 }
 
-float K(int l, int m)
+float K(float l, float m)
 {
-    // renormalisation constant for SH function
-    float temp = (float(2 * l + 1) * factorial(l - m)) / (4.0 * PI * factorial(l + m));
-    return sqrt(temp);
+	// renormalisation constant for SH function
+	float temp = (float(2.0f * l + 1.0f) * factorial(l - m)) / (4.0f * PI * factorial(l + m));
+	return sqrt(temp);
 }
 
-float SH(int l, int m, float theta, float phi)
+float SH(float l, float m, float theta, float phi)
 {
-    // return a point sample of a Spherical Harmonic basis function
-    // l is the band, range [0..N]
-    // m in the range [-l..l]
-    // theta in the range [0..Pi]
-    // phi in the range [0..2*Pi]
-    const float sqrt2 = 1.41421356237;
-    if (m == 0) {
-        return K(l, 0) * P(l, m, cos(theta));
-    }
-    else {
-        if (m > 0) {
-            return sqrt2 * K(l, m) * cos(float(m) * phi) * P(l, m, cos(theta));
-        }
-        else {
-            return sqrt2 * K(l, -m) * sin(float(-m) * phi) * P(l, -m, cos(theta));
-        }
-    }
+	// return a point sample of a Spherical Harmonic basis function
+	// l is the band, range [0..N]
+	// m in the range [-l..l]
+	// theta in the range [0..Pi]
+	// phi in the range [0..2*Pi]
+	const float sqrt2 = 1.41421356237f;
+
+	if (m == 0.0f) {
+		return K(l, 0.0f) * P(l, m, cos(theta));
+	}
+	else {
+		if (m > 0.0f) {
+			return sqrt2 * K(l, m) * cos(m * phi) * P(l, m, cos(theta));
+		}
+		else {
+			return sqrt2 * K(l, -m) * sin(-m * phi) * P(l, -m, cos(theta));
+		}
+	}
 }
 
 // +------------------------------------------------------------------------------+
@@ -334,11 +337,11 @@ float3 sampleGlyph(float s, float t){
 	// | Option A BEGIN: Render _one_ SH basis function:                                                                 |
 	// |                                                                             Activate by uncommenting until END: |
 	// |                                                                             (and disable other options)         |
-	int shBand = 4;
-	int shFunctionIndex = 2;
-	float f = SH(shBand, shFunctionIndex, v, u);
-	f = abs(f);
-	f = lerp(f, 0.5f, max(0.0f, sinf(time)));
+	// int shBand = 4;
+	// int shFunctionIndex = 2;
+	// float f = SH(shBand, shFunctionIndex, v, u);
+	// f = abs(f);
+	// f = lerp(f, 0.5f, max(0.0f, sinf(time)));
 	// |                                                                                                    Option A END |
 	// +-----------------------------------------------------------------------------------------------------------------+
 
@@ -346,19 +349,19 @@ float3 sampleGlyph(float s, float t){
 	// | Option B BEGIN: Try to render something that is composed of multiple SH basis functions (a "real" glyph):       |
 	// |                                                                             Activate by uncommenting until END: |
 	// |                                                                             (and disable other options)         |
-	// // Fake evaluation
+	// Fake evaluation
 	// float f = 0.f; // Initialize to 0 and then add all the coefficients from the different bands
-	// const int l_max = 0; // TODO: Herr Doktor, sobald ich l_max auf irgendwas > 0 setze, geht nix mehr :so_sad:
-	// const int totalCoeffs = (l_max+1) * (l_max+1);
-	// for (int l = 0; l <= l_max; ++l) {
-	// 	for (int m = -l; m <= l; ++m) {
-	// 		int runningCoeffId = l*l + l/2 + m;
-	// 		float iHaveNoIdeaWhatImScaling = sinf(float(runningCoeffId) / float(totalCoeffs) * 3.14 - time);
+	// int l_max = 4; // TODO: Herr Doktor, sobald ich l_max auf irgendwas > 0 setze, geht nix mehr :so_sad:
+	// int totalCoeffs = (l_max+1) * (l_max+1);
+	// for (int l = 0; l <= l_max; ++l)
+	// for (int m = -l; m <= l; ++m) 
+	// {
+	// 	int runningCoeffId = l*l + l/2 + m;
+	// 	float iHaveNoIdeaWhatImScaling = sinf(float(runningCoeffId) / float(totalCoeffs) * 3.14f - time);
 
-	// 		float coeffScale = SH(l, m, v, u);
-	// 		coeffScale = abs(coeffScale);
-	// 		f += iHaveNoIdeaWhatImScaling * coeffScale;
-	// 	}
+	// 	float coeffScale = SH(l, m, v, u);
+	// 	coeffScale = abs(coeffScale);
+	// 	f += iHaveNoIdeaWhatImScaling * coeffScale;
 	// }
 	// |                                                                                                    Option B END |
 	// +-----------------------------------------------------------------------------------------------------------------+
@@ -367,37 +370,39 @@ float3 sampleGlyph(float s, float t){
 	// | Option C BEGIN: SH coefficients from here: https://www.shadertoy.com/view/dlGSDV                                |
 	// |                                                                             Activate by uncommenting until END: |
 	// |                                                                             (and disable other options)         |
-	// // The index of the highest used band of the spherical harmonics basis. Must be
-	// // even, at least 2 and at most 12.
-	// #define SH_DEGREE 4
-	// // The number of spherical harmonics basis functions
-	// #define SH_COUNT (((SH_DEGREE + 1) * (SH_DEGREE + 2)) / 2)
-	//     float sh_coeffs[SH_COUNT];
-	//     sh_coeffs[0] = -0.2739740312099;  sh_coeffs[1] = 0.2526670396328;  sh_coeffs[2] = 1.8922271728516;  sh_coeffs[3] = 0.2878578901291;  sh_coeffs[4] = -0.5339795947075;  sh_coeffs[5] = -0.2620058953762;
-	// #if SH_DEGREE >= 4
-	//     sh_coeffs[6] = 0.1580424904823;  sh_coeffs[7] = 0.0329004973173;  sh_coeffs[8] = -0.1322413831949;  sh_coeffs[9] = -0.1332057565451;  sh_coeffs[10] = 1.0894461870193;  sh_coeffs[11] = -0.6319401264191;  sh_coeffs[12] = -0.0416776277125;  sh_coeffs[13] = -1.0772529840469;  sh_coeffs[14] = 0.1423762738705;
-	// #endif
-	// #if SH_DEGREE >= 6
-	//     sh_coeffs[15] = 0.7941166162491;  sh_coeffs[16] = 0.7490307092667;  sh_coeffs[17] = -0.3428381681442;  sh_coeffs[18] = 0.1024847552180;  sh_coeffs[19] = -0.0219132602215;  sh_coeffs[20] = 0.0499043911695;  sh_coeffs[21] = 0.2162453681231;  sh_coeffs[22] = 0.0921059995890;  sh_coeffs[23] = -0.2611238956451;  sh_coeffs[24] = 0.2549301385880;  sh_coeffs[25] = -0.4534865319729;  sh_coeffs[26] = 0.1922748684883;  sh_coeffs[27] = -0.6200597286224;
-	// #endif
-	// #if SH_DEGREE >= 8
-	//     sh_coeffs[28] = -0.0532187558711;  sh_coeffs[29] = -0.3569841980934;  sh_coeffs[30] = 0.0293972902000;  sh_coeffs[31] = -0.1977960765362;  sh_coeffs[32] = -0.1058669015765;  sh_coeffs[33] = 0.2372217923403;  sh_coeffs[34] = -0.1856198310852;  sh_coeffs[35] = -0.3373193442822;  sh_coeffs[36] = -0.0750469490886;  sh_coeffs[37] = 0.2146576642990;  sh_coeffs[38] = -0.0490148440003;  sh_coeffs[39] = 0.1288588196039;  sh_coeffs[40] = 0.3173974752426;  sh_coeffs[41] = 0.1990085393190;  sh_coeffs[42] = -0.1736343950033;  sh_coeffs[43] = -0.0482443645597;  sh_coeffs[44] = 0.1749017387629;
-	// #endif
-	// #if SH_DEGREE >= 10
-	//     sh_coeffs[45] = -0.0151847425660;  sh_coeffs[46] = 0.0418366046081;  sh_coeffs[47] = 0.0863263587216;  sh_coeffs[48] = -0.0649211244490;  sh_coeffs[49] = 0.0126096132283;  sh_coeffs[50] = 0.0545089217982;  sh_coeffs[51] = -0.0275142164626;  sh_coeffs[52] = 0.0399986574832;  sh_coeffs[53] = -0.0468244261610;  sh_coeffs[54] = -0.1292105653111;  sh_coeffs[55] = -0.0786858322658;  sh_coeffs[56] = -0.0663828464882;  sh_coeffs[57] = 0.0382439706831;  sh_coeffs[58] = -0.0041550330365;  sh_coeffs[59] = -0.0502800566338;  sh_coeffs[60] = -0.0732471630735;  sh_coeffs[61] = 0.0181751900972;  sh_coeffs[62] = -0.0090119333757;  sh_coeffs[63] = -0.0604443282359;  sh_coeffs[64] = -0.1469985252752;  sh_coeffs[65] = -0.0534046899715;
-	// #endif
-	// #if SH_DEGREE >= 12
-	//     sh_coeffs[66] = -0.0896672753415;  sh_coeffs[67] = -0.0130841364808;  sh_coeffs[68] = -0.0112942893801;  sh_coeffs[69] = 0.0272257498541;  sh_coeffs[70] = 0.0626717616331;  sh_coeffs[71] = -0.0222197983050;  sh_coeffs[72] = -0.0018541504308;  sh_coeffs[73] = -0.1653251944056;  sh_coeffs[74] = 0.0409697402846;  sh_coeffs[75] = 0.0749921454327;  sh_coeffs[76] = -0.0282830872616;  sh_coeffs[77] = 0.0006909458525;  sh_coeffs[78] = 0.0625599842287;  sh_coeffs[79] = 0.0812529816082;  sh_coeffs[80] = 0.0914693020772;  sh_coeffs[81] = -0.1197222726745;  sh_coeffs[82] = 0.0376277453183;  sh_coeffs[83] = -0.0832617004142;  sh_coeffs[84] = -0.0482175038043;  sh_coeffs[85] = -0.0839003635737;  sh_coeffs[86] = -0.0349423908400;  sh_coeffs[87] = 0.1204519568256;  sh_coeffs[88] = 0.0783745984003;  sh_coeffs[89] = 0.0297401205976;  sh_coeffs[90] = -0.0505947662525;
-	// #endif
-	// int weightIndex = 0;
-	// float f = 0.f; // Initialize to 0 and then add all the coefficients from the different bands
-	// for (int l = 0; l <= SH_DEGREE; l += 2) {
-	// 	for (int m = -l; m <= l; ++m) {
-	// 		float coeffScale = SH(l, m, v, u);
-	// 		//coeffScale = abs(coeffScale); // TODO: not sure if needed
-	// 		f += sh_coeffs[weightIndex++] * coeffScale;
-	// 	}
-	// }
+	// The index of the highest used band of the spherical harmonics basis. Must be
+	// even, at least 2 and at most 12.
+	#define SH_DEGREE 6
+	// The number of spherical harmonics basis functions
+	#define SH_COUNT (((SH_DEGREE + 1) * (SH_DEGREE + 2)) / 2)
+	    float sh_coeffs[SH_COUNT];
+	    sh_coeffs[0] = -0.2739740312099f;  sh_coeffs[1] = 0.2526670396328f;  sh_coeffs[2] = 1.8922271728516f;  sh_coeffs[3] = 0.2878578901291f;  sh_coeffs[4] = -0.5339795947075;  sh_coeffs[5] = -0.2620058953762f;
+	#if SH_DEGREE >= 4
+	    sh_coeffs[6] = 0.1580424904823f;  sh_coeffs[7] = 0.0329004973173f;  sh_coeffs[8] = -0.1322413831949f;  sh_coeffs[9] = -0.1332057565451f;  sh_coeffs[10] = 1.0894461870193f;  sh_coeffs[11] = -0.6319401264191f;  sh_coeffs[12] = -0.0416776277125f;  sh_coeffs[13] = -1.0772529840469f;  sh_coeffs[14] = 0.1423762738705f;
+	#endif
+	#if SH_DEGREE >= 6
+	    sh_coeffs[15] = 0.7941166162491f;  sh_coeffs[16] = 0.7490307092667f;  sh_coeffs[17] = -0.3428381681442f;  sh_coeffs[18] = 0.1024847552180f;  sh_coeffs[19] = -0.0219132602215f;  sh_coeffs[20] = 0.0499043911695f;  sh_coeffs[21] = 0.2162453681231f;  sh_coeffs[22] = 0.0921059995890f;  sh_coeffs[23] = -0.2611238956451f;  sh_coeffs[24] = 0.2549301385880f;  sh_coeffs[25] = -0.4534865319729f;  sh_coeffs[26] = 0.1922748684883f;  sh_coeffs[27] = -0.6200597286224f;
+	#endif
+	#if SH_DEGREE >= 8
+	    sh_coeffs[28] = -0.0532187558711f;  sh_coeffs[29] = -0.3569841980934f;  sh_coeffs[30] = 0.0293972902000f;  sh_coeffs[31] = -0.1977960765362f;  sh_coeffs[32] = -0.1058669015765f;  sh_coeffs[33] = 0.2372217923403f;  sh_coeffs[34] = -0.1856198310852f;  sh_coeffs[35] = -0.3373193442822f;  sh_coeffs[36] = -0.0750469490886f;  sh_coeffs[37] = 0.2146576642990f;  sh_coeffs[38] = -0.0490148440003f;  sh_coeffs[39] = 0.1288588196039f;  sh_coeffs[40] = 0.3173974752426f;  sh_coeffs[41] = 0.1990085393190f;  sh_coeffs[42] = -0.1736343950033f;  sh_coeffs[43] = -0.0482443645597f;  sh_coeffs[44] = 0.1749017387629f;
+	#endif
+	#if SH_DEGREE >= 10
+	    sh_coeffs[45] = -0.0151847425660f;  sh_coeffs[46] = 0.0418366046081f;  sh_coeffs[47] = 0.0863263587216f;  sh_coeffs[48] = -0.0649211244490f;  sh_coeffs[49] = 0.0126096132283f;  sh_coeffs[50] = 0.0545089217982f;  sh_coeffs[51] = -0.0275142164626f;  sh_coeffs[52] = 0.0399986574832f;  sh_coeffs[53] = -0.0468244261610f;  sh_coeffs[54] = -0.1292105653111f;  sh_coeffs[55] = -0.0786858322658f;  sh_coeffs[56] = -0.0663828464882f;  sh_coeffs[57] = 0.0382439706831f;  sh_coeffs[58] = -0.0041550330365f;  sh_coeffs[59] = -0.0502800566338f;  sh_coeffs[60] = -0.0732471630735f;  sh_coeffs[61] = 0.0181751900972f;  sh_coeffs[62] = -0.0090119333757f;  sh_coeffs[63] = -0.0604443282359f;  sh_coeffs[64] = -0.1469985252752f;  sh_coeffs[65] = -0.0534046899715f;
+	#endif
+	#if SH_DEGREE >= 12
+	    sh_coeffs[66] = -0.0896672753415f;  sh_coeffs[67] = -0.0130841364808f;  sh_coeffs[68] = -0.0112942893801f;  sh_coeffs[69] = 0.0272257498541f;  sh_coeffs[70] = 0.0626717616331f;  sh_coeffs[71] = -0.0222197983050f;  sh_coeffs[72] = -0.0018541504308f;  sh_coeffs[73] = -0.1653251944056f;  sh_coeffs[74] = 0.0409697402846f;  sh_coeffs[75] = 0.0749921454327f;  sh_coeffs[76] = -0.0282830872616f;  sh_coeffs[77] = 0.0006909458525f;  sh_coeffs[78] = 0.0625599842287f;  sh_coeffs[79] = 0.0812529816082f;  sh_coeffs[80] = 0.0914693020772f;  sh_coeffs[81] = -0.1197222726745f;  sh_coeffs[82] = 0.0376277453183f;  sh_coeffs[83] = -0.0832617004142f;  sh_coeffs[84] = -0.0482175038043f;  sh_coeffs[85] = -0.0839003635737f;  sh_coeffs[86] = -0.0349423908400f;  sh_coeffs[87] = 0.1204519568256f;  sh_coeffs[88] = 0.0783745984003f;  sh_coeffs[89] = 0.0297401205976f;  sh_coeffs[90] = -0.0505947662525f;
+	#endif
+	
+	int weightIndex = 0;
+	float f = 0.0f; // Initialize to 0 and then add all the coefficients from the different bands
+	
+	for (float l = 0.0f; l <= SH_DEGREE; l += 2.0f) 
+	for (float m = -l; m <= l; ++m) 
+	{
+		float coeffScale = SH(l, m, v, u);
+		//coeffScale = abs(coeffScale); // TODO: not sure if needed
+		f += sh_coeffs[weightIndex++] * coeffScale;
+	}
 	// |                                                                                                    Option C END |
 	// +-----------------------------------------------------------------------------------------------------------------+
 
@@ -406,6 +411,7 @@ float3 sampleGlyph(float s, float t){
 		f * sin(u) * sin(v),
 		f * cos(v)
 	};
+
 	return xyz;
 };
 
@@ -897,19 +903,23 @@ void kernel_generate_scene(
 
 	if(grid.thread_rank() == 0){
 
-		models[0] = {uniforms.model, float3{ 2.1, 0.0, -2.1}};
-		models[1] = {uniforms.model, float3{ 0.0, 0.0, -2.1}};
-		models[2] = {uniforms.model, float3{-2.1, 0.0, -2.1}};
+		// models[0] = {uniforms.model, float3{ 2.1, 0.0, -2.1}};
+		// models[1] = {uniforms.model, float3{ 0.0, 0.0, -2.1}};
+		// models[2] = {uniforms.model, float3{-2.1, 0.0, -2.1}};
 
-		models[3] = {uniforms.model, float3{ 2.1, 0.0, 0.0}};
-		models[4] = {uniforms.model, float3{ 0.0, 0.0, 0.0}};
-		models[5] = {uniforms.model, float3{-2.1, 0.0, 0.0}};
+		// models[3] = {uniforms.model, float3{ 2.1, 0.0, 0.0}};
+		// models[4] = {uniforms.model, float3{ 0.0, 0.0, 0.0}};
+		// models[5] = {uniforms.model, float3{-2.1, 0.0, 0.0}};
 
-		models[6] = {uniforms.model, float3{ 2.1, 0.0, 2.1}};
-		models[7] = {uniforms.model, float3{ 0.0, 0.0, 2.1}};
-		models[8] = {uniforms.model, float3{-2.1, 0.0, 2.1}};
+		// models[6] = {uniforms.model, float3{ 2.1, 0.0, 2.1}};
+		// models[7] = {uniforms.model, float3{ 0.0, 0.0, 2.1}};
+		// models[8] = {uniforms.model, float3{-2.1, 0.0, 2.1}};
 
-		*numModels = 9;
+		// *numModels = 9;
+
+
+		models[1] = {uniforms.model, float3{ 0.0, 0.0, 0.0}};
+		*numModels = 1;
 	}
 
 }
