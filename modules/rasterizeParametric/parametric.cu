@@ -200,18 +200,193 @@ float3 sampleExtraFunkyPlane(float s, float t){
 	};
 };
 
+
+// +------------------------------------------------------------------------------+
+// |   Helper functions for Spherical Harmonics evaluation BEGIN                  |
+// +------------------------------------------------------------------------------+
+
+float sinc(float x) /* Supporting sinc function */
+{
+    if (abs(x) < 1.0e-4)
+        return 1.0;
+    else
+        return (sin(x) / x);
+}
+
+float factorial(int a_number)
+{
+    switch(a_number) {
+        case  0: return 1.0;
+        case  1: return 1.0;
+        case  2: return 2.0;
+        case  3: return 6.0;
+        case  4: return 24.0;
+        case  5: return 120.0;
+        case  6: return 720.0;
+        case  7: return 5040.0;
+        case  8: return 40320.0;
+        case  9: return 362880.0;
+        case 10: return 3628800.0;
+        case 11: return 39916800.0;
+        case 12: return 479001600.0;
+        case 13: return 6227020800.0;
+        case 14: return 87178291200.0;
+        case 15: return 1307674368000.0;
+        case 16: return 20922789888000.0;
+        case 17: return 355687428096000.0;
+        case 18: return 6402373705728000.0;
+        case 19: return 121645100408832000.0;
+        case 20: return 2432902008176640000.0;
+        case 21: return 51090942171709440000.0;
+        case 22: return 1124000727777607680000.0;
+        case 23: return 25852016738884976640000.0;
+        case 24: return 620448401733239439360000.0;
+        case 25: return 15511210043330985984000000.0;
+        case 26: return 403291461126605635584000000.0;
+        case 27: return 10888869450418352160768000000.0;
+        case 28: return 304888344611713860501504000000.0;
+        case 29: return 8841761993739701954543616000000.0;
+        case 30: return 265252859812191058636308480000000.0;
+        case 31: return 8222838654177922817725562880000000.0;
+        case 32: return 263130836933693530167218012160000000.0;
+        case 33: return 8683317618811886495518194401280000000.0;
+    }
+    return 0.0;
+}
+
+float P(int l, int m, float x)
+{
+    // evaluate an Associated Legendre Polynomial P(l,m,x) at x
+    float pmm = 1.0;
+    if (m > 0) {
+        float somx2 = sqrt((1.0 - x)*(1.0 + x));
+        float fact = 1.0;
+        for (int i=1; i <= m; ++i) {
+            pmm *= (-fact) * somx2;
+            fact += 2.0;
+        }
+    }
+    
+    if (l == m) {
+        return pmm;
+    }
+    
+    float pmmp1 = x * float(2 * m + 1) * pmm;
+    
+    if (l == m + 1) {
+        return pmmp1;
+    }
+    
+    float pll = 0.0;
+    for (int ll = m+2; ll <= l; ++ll) {
+        pll = (float(2 * ll - 1) * x * pmmp1 - float(ll + m - 1)*pmm) / float(ll - m);
+        pmm = pmmp1;
+        pmmp1 = pll;
+    }
+    return pll;
+}
+
+float K(int l, int m)
+{
+    // renormalisation constant for SH function
+    float temp = (float(2 * l + 1) * factorial(l - m)) / (4.0 * PI * factorial(l + m));
+    return sqrt(temp);
+}
+
+float SH(int l, int m, float theta, float phi)
+{
+    // return a point sample of a Spherical Harmonic basis function
+    // l is the band, range [0..N]
+    // m in the range [-l..l]
+    // theta in the range [0..Pi]
+    // phi in the range [0..2*Pi]
+    const float sqrt2 = 1.41421356237;
+    if (m == 0) {
+        return K(l, 0) * P(l, m, cos(theta));
+    }
+    else {
+        if (m > 0) {
+            return sqrt2 * K(l, m) * cos(float(m) * phi) * P(l, m, cos(theta));
+        }
+        else {
+            return sqrt2 * K(l, -m) * sin(float(-m) * phi) * P(l, -m, cos(theta));
+        }
+    }
+}
+
+// +------------------------------------------------------------------------------+
+// |   Helper functions for Spherical Harmonics evaluation END                    |
+// +------------------------------------------------------------------------------+
+
+float3 sampleGlyph(float s, float t){
+
+	float scale = 10.0f;
+	float height = 0.105f;
+
+	float time = uniforms.time;
+	// float time = 123.0;
+	float su = s - 0.5f;
+	float tu = t - 0.5f;
+	float u = 2.0f * 3.14f * s;
+	float v = 3.14f * t;
+	
+	// +-----------------------------------------------------------------------------------------------------------------+
+	// | Option A BEGIN: Render _one_ SH basis function:                                                                 |
+	// |                                                                             Activate by uncommenting until END: |
+	// |                                                                             (and disable other options)         |
+	int shBand = 4;
+	int shFunctionIndex = 2;
+	float f = SH(shBand, shFunctionIndex, v, u);
+	f = abs(f);
+	f = lerp(f, 0.5f, max(0.0f, sinf(time)));
+	// |                                                                                                    Option A END |
+	// +-----------------------------------------------------------------------------------------------------------------+
+
+	// +-----------------------------------------------------------------------------------------------------------------+
+	// | Option B BEGIN: Try to render something that is composed of multiple SH basis functions (a "real" glyph):       |
+	// |                                                                             Activate by uncommenting until END: |
+	// |                                                                             (and disable other options)         |
+	// // Fake evaluation
+	// float f = 0.f; // Initialize to 0 and then add all the coefficients from the different bands
+	// const int l_max = 0; // TODO: Herr Doktor, sobald ich l_max auf irgendwas > 0 setze, geht nix mehr :so_sad:
+	// const int totalCoeffs = (l_max+1) * (l_max+1);
+	// for (int l = 0; l <= l_max; ++l) {
+	// 	for (int m = -l; m <= l; ++m) {
+	// 		int runningCoeffId = l*l + l/2 + m;
+	// 		float iHaveNoIdeaWhatImScaling = sinf(float(runningCoeffId) / float(totalCoeffs) * 3.14 - time);
+
+	// 		float coeffScale = SH(l, m, v, u);
+	// 		coeffScale = abs(coeffScale);
+	// 		f += iHaveNoIdeaWhatImScaling * coeffScale;
+	// 	}
+	// }
+	// |                                                                                                    Option B END |
+	// +-----------------------------------------------------------------------------------------------------------------+
+
+	float3 xyz = {
+		f * cos(u) * sin(v),
+		f * sin(u) * sin(v),
+		f * cos(v)
+	};
+	return xyz;
+};
+
+
 // sampleSinCos, samplePlane, sampleSphere;
 // auto sample = sampleSinCos;
 
 auto getSampler(int model){
-	if(model == MODEL_FUNKY_PLANE){
-		return sampleFunkyPlane;
-	}else if(model == MODEL_EXTRA_FUNKY_PLANE){
-		return sampleExtraFunkyPlane;
-	}else if(model == MODEL_SPHERE){
-		return sampleSphere;
-	}else{
-		return samplePlane;
+	switch (model) {
+		case MODEL_FUNKY_PLANE:
+			return sampleFunkyPlane;
+		case MODEL_EXTRA_FUNKY_PLANE:
+			return sampleExtraFunkyPlane;
+		case MODEL_SPHERE:
+			return sampleSphere;
+		case MODEL_GLYPH:
+			return sampleGlyph;
+		default:
+			return samplePlane;
 	}
 };
 

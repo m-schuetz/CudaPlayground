@@ -98,10 +98,11 @@ int METHOD_32X32           = 0;
 int METHOD_RUNNIN_THRU     = 1;
 int METHOD_SAMPLEPERF_TEST = 2;
 
-int MODEL_PLANE                  = 0;
-int MODEL_FUNKY_PLANE            = 1;
-int MODEL_EXTRA_FUNKY_PLANE      = 2;
-int MODEL_SPHERE                 = 3;
+constexpr int MODEL_PLANE                  = 0;
+constexpr int MODEL_FUNKY_PLANE            = 1;
+constexpr int MODEL_EXTRA_FUNKY_PLANE      = 2;
+constexpr int MODEL_SPHERE                 = 3;
+constexpr int MODEL_GLYPH                  = 4;
 
 struct Uniforms{
 	float width;
