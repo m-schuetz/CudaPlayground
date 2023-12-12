@@ -398,7 +398,12 @@ float3 sampleGlyph(float s, float t){
 			float coeffScale = SH(l, m, v, u);
 			// float coeffScale = 1.0f;
 			// coeffScale = abs(coeffScale); // TODO: not sure if needed
-			f += sh_coefficients[weightIndex++] * coeffScale;
+
+			// static
+			// f += sh_coefficients[weightIndex++] * coeffScale;
+
+			// animated
+			f += sin(float(0.02f * uniforms.time * weightIndex)) * sh_coefficients[weightIndex++] * coeffScale;
 		}
 	}
 	// |                                                                                                    Option C END |
