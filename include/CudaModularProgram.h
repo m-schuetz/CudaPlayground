@@ -129,6 +129,8 @@ struct CudaModularProgram{
 
 	CUmodule mod;
 	// CUfunction kernel = nullptr;
+	void* cubin;
+	size_t cubinSize;
 
 	vector<std::function<void(void)>> compileCallbacks;
 
@@ -217,10 +219,14 @@ struct CudaModularProgram{
 				0, 0, 0));
 		}
 
-		size_t cubinSize;
-		void *cubin;
+		// size_t cubinSize;
+		// void *cubin;
 
 		cu_checked(cuLinkComplete(linkState, &cubin, &cubinSize));
+
+		static int cubinID = 0;
+		writeBinaryFile(format("./program_{}.cubin", cubinID), (uint8_t*)cubin, cubinSize);
+		cubinID++;
 
 		// {
 		// 	printf("link duration: %f ms \n", walltime);
