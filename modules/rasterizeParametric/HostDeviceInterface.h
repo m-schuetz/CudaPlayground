@@ -122,6 +122,7 @@ struct Uniforms{
 	bool isPaused;
 	bool enableRefinement;
 	bool lockFrustum;
+	int  cullingMode;
 };
 
 struct Stats{

@@ -29,6 +29,7 @@ struct{
 	bool enableRefinement     = false;
 	double timeSinceLastFrame = 0.0;
 	bool lockFrustum          = false;
+	int cullingMode           = 0; // 0...None, 1...back faces, 2...front faces
 } settings;
 
 float duration_scene;
@@ -99,6 +100,7 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 	uniforms.isPaused = settings.isPaused;
 	uniforms.enableRefinement = settings.enableRefinement;
 	uniforms.lockFrustum = settings.lockFrustum;
+	uniforms.cullingMode = settings.cullingMode;
 
 	glm::mat4 rotX = glm::rotate(glm::mat4(), 3.1415f * 0.5f, glm::vec3(1.0, 0.0, 0.0));
 
@@ -522,8 +524,9 @@ int main(){
 				settings.isPaused = !settings.isPaused;
 			}
 
-			ImGui::Checkbox("Enable Refinement",     &settings.enableRefinement);
-			ImGui::Checkbox("lock frustum",          &settings.lockFrustum);
+			ImGui::Checkbox("Enable Refinement",       &settings.enableRefinement);
+			ImGui::Checkbox("lock frustum",            &settings.lockFrustum);
+			ImGui::Combo("Face/Patch Culling",         &settings.cullingMode, "None\0Cull back faces\0Cull front faces\0");
 
 			ImGui::Text("Method:");
 			ImGui::RadioButton("sampleperf test (100M samples)", &settings.method, METHOD_SAMPLEPERF_TEST);

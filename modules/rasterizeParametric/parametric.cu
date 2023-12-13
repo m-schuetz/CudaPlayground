@@ -577,14 +577,19 @@ void generatePatches2(
 				// TODO: do backface culling here? 
 				// If the patch faces away from the camera, ignore it. 
 
-				float3 v_00 = make_float3(uniforms.view * uniforms.world * float4{p_00.x, p_00.y, p_00.z, 1.0f});
-				float3 v_01 = make_float3(uniforms.view * uniforms.world * float4{p_01.x, p_01.y, p_01.z, 1.0f});
-				float3 v_10 = make_float3(uniforms.view * uniforms.world * float4{p_10.x, p_10.y, p_10.z, 1.0f});
-				float3 t_01 = v_01 - v_00;
-				float3 t_10 = v_10 - v_00;
-				float3 v_n = normalize(cross(t_01, t_10));
-				constexpr float THRESHOLD = 0.4; // not 0 because displacement could make parts of the patch visible if it is nearly parallel to viewing direction
-				if (dot(v_n, v_00) > THRESHOLD && dot(v_n, v_01) > THRESHOLD && dot(v_n, v_10) > THRESHOLD) return;
+				if (uniforms.cullingMode > 0) {
+					float3 v_00 = make_float3(uniforms.view * uniforms.world * float4{p_00.x, p_00.y, p_00.z, 1.0f});
+					float3 v_01 = make_float3(uniforms.view * uniforms.world * float4{p_01.x, p_01.y, p_01.z, 1.0f});
+					float3 v_10 = make_float3(uniforms.view * uniforms.world * float4{p_10.x, p_10.y, p_10.z, 1.0f});
+					float3 t_01 = v_01 - v_00;
+					float3 t_10 = v_10 - v_00;
+					float3 v_n = normalize(cross(t_01, t_10));
+					constexpr float THRESHOLD = 0.4; // not 0 because displacement could make parts of the patch visible if it is nearly parallel to viewing direction
+					if (uniforms.cullingMode == 2) {
+						v_n = -v_n;
+					}
+					if (dot(v_n, v_00) > THRESHOLD && dot(v_n, v_01) > THRESHOLD && dot(v_n, v_10) > THRESHOLD) return;
+				}
 
 				uint32_t targetIndex = atomicAdd(numPatches, 1);
 
