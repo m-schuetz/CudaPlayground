@@ -471,7 +471,7 @@ void generatePatches2(
 
 	grid.sync();
 
-	// Create initial set of patches
+	// Create initial set of patches => divide whatever uv-parametric function we have into 8x8 tiles, then refine:
 	constexpr int initialPatchGridSize = 8;
 
 	for(int modelID = 0; modelID < *numModels; modelID++){
@@ -577,13 +577,14 @@ void generatePatches2(
 				// TODO: do backface culling here? 
 				// If the patch faces away from the camera, ignore it. 
 
-				// float3 t_01 = p_01 - p_00;
-				// float3 t_10 = p_10 - p_00;
-				// float3 N = normalize(cross(t_01, t_10));
-				// float3 N_v = make_float3(uniforms.view * float4{N.x, N.y, N.z, 0.0});
-				
-				// float a = dot(N_v, float3{0.0, 0.0, 1.0});
-				// if(a < 0.0) return;
+				float3 t_01 = p_01 - p_00;
+				float3 t_10 = p_10 - p_00;
+				float3 N = normalize(cross(t_01, t_10));
+				float3 N_v = make_float3(uniforms.view * uniforms.world * float4{N.x, N.y, N.z, 0.0});
+				if (N_v.z < 0.0f) {
+					// cull 
+					return;
+				}
 
 				uint32_t targetIndex = atomicAdd(numPatches, 1);
 
