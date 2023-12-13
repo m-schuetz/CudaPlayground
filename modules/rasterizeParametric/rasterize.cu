@@ -46,7 +46,7 @@ mat4 operator*(const mat4& a, const mat4& b){
 	return result;
 }
 
-void drawPoint(float4 coord, uint64_t* framebuffer, uint32_t color, Uniforms& uniforms){
+void drawPoint(float4 coord, uint64_t* framebuffer, uint64_t* heatmap,  uint32_t color, Uniforms& uniforms){
 
 	int x = coord.x;
 	int y = coord.y;
@@ -63,7 +63,7 @@ void drawPoint(float4 coord, uint64_t* framebuffer, uint32_t color, Uniforms& un
 	}
 }
 
-void drawSprite(float4 coord, uint64_t* framebuffer, uint32_t color, Uniforms& uniforms){
+void drawSprite(float4 coord, uint64_t* framebuffer, uint64_t* heatmap,  uint32_t color, Uniforms& uniforms){
 
 	int x = coord.x;
 	int y = coord.y;
@@ -471,7 +471,7 @@ void generatePatches(Patch* patches, uint32_t* numPatches, Uniforms& uniforms){
 	});
 }
 
-void rasterizePatches(Patch* patches, uint32_t* numPatches, uint64_t* framebuffer, Uniforms& uniforms){
+void rasterizePatches(Patch* patches, uint32_t* numPatches, uint64_t* framebuffer, uint64_t* heatmap,  Uniforms& uniforms){
 
 	auto grid = cg::this_grid();
 	auto block = cg::this_thread_block();

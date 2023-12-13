@@ -77,7 +77,7 @@ mat4 operator*(const mat4& a, const mat4& b){
 	return result;
 }
 
-void drawPoint(float4 coord, uint64_t* framebuffer, uint32_t color, Uniforms& uniforms){
+void drawPoint(float4 coord, uint64_t* framebuffer, uint64_t* heatmap,  uint32_t color, Uniforms& uniforms){
 
 	int x = coord.x;
 	int y = coord.y;
@@ -91,10 +91,12 @@ void drawPoint(float4 coord, uint64_t* framebuffer, uint32_t color, Uniforms& un
 		uint64_t encoded = (udepth << 32) | color;
 
 		atomicMin(&framebuffer[pixelID], encoded);
+
+		atomicAdd(&heatmap[pixelID], 1);
 	}
 }
 
-void drawSprite(float4 coord, uint64_t* framebuffer, uint32_t color, Uniforms& uniforms){
+void drawSprite(float4 coord, uint64_t* framebuffer, uint64_t* heatmap,  uint32_t color, Uniforms& uniforms){
 
 	int x = coord.x;
 	int y = coord.y;
@@ -641,7 +643,7 @@ void generatePatches2(
 void rasterizePatches_32x32(
 	Model* models, uint32_t* numModels,
 	Patch* patches, uint32_t* numPatches, 
-	uint64_t* framebuffer, 
+	uint64_t* framebuffer, uint64_t* heatmap,  
 	Uniforms& uniforms,
 	Patch* newPatches, uint32_t* numNewPatches, 
 	bool createNewPatches
@@ -774,7 +776,7 @@ void rasterizePatches_32x32(
 		// drawSprite(ps, framebuffer, color, uniforms);
 
 		// if(N.x > 10.0)
-		drawPoint(ps, framebuffer, color, uniforms);
+		drawPoint(ps, framebuffer, heatmap, color, uniforms);
 
 		block.sync();
 
@@ -827,7 +829,7 @@ void rasterizePatches_32x32(
 void rasterizePatches_runnin_thru(
 	Model* models, uint32_t* numModels,
 	Patch* patches, uint32_t* numPatches,
-	uint64_t* framebuffer, 
+	uint64_t* framebuffer, uint64_t* heatmap,  
 	Uniforms& uniforms
 ){
 
@@ -898,7 +900,7 @@ void rasterizePatches_runnin_thru(
 			rgba[3] = 255;
 
 			// if(p.x * p.y == 123.0f)
-			drawPoint(ps, framebuffer, color, uniforms);
+			drawPoint(ps, framebuffer, heatmap, color, uniforms);
 
 		}
 
@@ -989,7 +991,7 @@ extern "C" __global__
 void kernel_sampleperf_test(
 	const Uniforms _uniforms,
 	unsigned int* buffer,
-	uint64_t* framebuffer,
+	uint64_t* framebuffer, uint64_t* heatmap, 
 	Model* models, uint32_t* numModels,
 	Patch* patches, uint32_t* numPatches,
 	cudaSurfaceObject_t gl_colorbuffer,
@@ -1047,7 +1049,7 @@ extern "C" __global__
 void kernel_clear_framebuffer(
 	const Uniforms _uniforms,
 	unsigned int* buffer,
-	uint64_t* framebuffer,
+	uint64_t* framebuffer, uint64_t* heatmap, 
 	Model* models, uint32_t* numModels,
 	Patch* patches, uint32_t* numPatches,
 	cudaSurfaceObject_t gl_colorbuffer,
@@ -1063,11 +1065,26 @@ void kernel_clear_framebuffer(
 
 }
 
+#define MAX_HEATMAP_COLORS 11
+constexpr uint32_t heatmapColors[MAX_HEATMAP_COLORS] = {
+    0xa50026ff,
+	0xd73027ff,
+	0xf46d43ff,
+	0xfdae61ff,
+	0xfee08bff,
+	0xffffbfff,
+	0xd9ef8bff,
+	0xa6d96aff,
+	0x66bd63ff,
+	0x1a9850ff,
+	0x006837ff
+};
+
 extern "C" __global__
 void kernel_framebuffer_to_OpenGL(
-	const Uniforms _uniforms,
+	const Uniforms& _uniforms,
 	unsigned int* buffer,
-	uint64_t* framebuffer,
+	uint64_t* framebuffer, uint64_t* heatmap, 
 	Model* models, uint32_t* numModels,
 	Patch* patches, uint32_t* numPatches,
 	cudaSurfaceObject_t gl_colorbuffer,
@@ -1082,10 +1099,16 @@ void kernel_framebuffer_to_OpenGL(
 		int x = pixelIndex % int(_uniforms.width);
 		int y = pixelIndex / int(_uniforms.width);
 
-		uint64_t encoded = framebuffer[pixelIndex];
-		uint32_t color = encoded & 0xffffffffull;
-
-		surf2Dwrite(color, gl_colorbuffer, x * 4, y);
+		// if (_uniforms.showHeatmap) {
+		// 	auto inp = heatmap[pixelIndex];
+		// 	inp = clamp(inp, 0, MAX_HEATMAP_COLORS-1);
+		// 	surf2Dwrite(heatmapColors[inp], gl_colorbuffer, x * 4, y);
+		// }
+		// else {
+			uint64_t encoded = framebuffer[pixelIndex];
+			uint32_t color = encoded & 0xffffffffull;
+			surf2Dwrite(color, gl_colorbuffer, x * 4, y);
+		// }
 	});
 
 	if(grid.thread_rank() == 0){
@@ -1098,7 +1121,7 @@ extern "C" __global__
 void kernel_rasterize_patches_32x32(
 	const Uniforms _uniforms,
 	unsigned int* buffer,
-	uint64_t* framebuffer,
+	uint64_t* framebuffer, uint64_t* heatmap, 
 	Model* models, uint32_t* numModels,
 	Patch* patches, uint32_t* numPatches,
 	cudaSurfaceObject_t gl_colorbuffer,
@@ -1126,7 +1149,7 @@ void kernel_rasterize_patches_32x32(
 	rasterizePatches_32x32(
 		models, numModels,
 		patches, numPatches, 
-		framebuffer, 
+		framebuffer, heatmap,
 		uniforms,
 		newPatches, numNewPatches, true
 	);
@@ -1138,7 +1161,7 @@ void kernel_rasterize_patches_32x32(
 		rasterizePatches_32x32(
 			models, numModels,
 			newPatches, numNewPatches, 
-			framebuffer, 
+			framebuffer, heatmap,
 			uniforms,
 			patches, numPatches, false
 		);
@@ -1155,7 +1178,7 @@ extern "C" __global__
 void kernel_rasterize_patches_runnin_thru(
 	const Uniforms _uniforms,
 	unsigned int* buffer,
-	uint64_t* framebuffer,
+	uint64_t* framebuffer, uint64_t* heatmap, 
 	Model* models, uint32_t* numModels,
 	Patch* patches, uint32_t* numPatches,
 	cudaSurfaceObject_t gl_colorbuffer,
@@ -1170,7 +1193,7 @@ void kernel_rasterize_patches_runnin_thru(
 	allocator = &_allocator;
 
 	grid.sync();
-	rasterizePatches_runnin_thru(models, numModels, patches, numPatches, framebuffer, uniforms);
+	rasterizePatches_runnin_thru(models, numModels, patches, numPatches, framebuffer, heatmap, uniforms);
 
 }
 

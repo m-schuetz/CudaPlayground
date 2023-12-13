@@ -30,6 +30,7 @@ struct{
 	double timeSinceLastFrame = 0.0;
 	bool lockFrustum          = false;
 	int cullingMode           = 0; // 0...None, 1...back faces, 2...front faces
+	bool showHeatmap          = false;
 } settings;
 
 float duration_scene;
@@ -38,6 +39,7 @@ float duration_rasterization;
 
 CUdeviceptr cptr_buffer;
 CUdeviceptr cptr_framebuffer;
+CUdeviceptr cptr_heatmap;
 CUdeviceptr cptr_models, cptr_numModels;
 CUdeviceptr cptr_patches, cptr_numPatches;
 CUdeviceptr cptr_stats;
@@ -101,6 +103,7 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 	uniforms.enableRefinement = settings.enableRefinement;
 	uniforms.lockFrustum = settings.lockFrustum;
 	uniforms.cullingMode = settings.cullingMode;
+	uniforms.showHeatmap = settings.showHeatmap;
 
 	glm::mat4 rotX = glm::rotate(glm::mat4(), 3.1415f * 0.5f, glm::vec3(1.0, 0.0, 0.0));
 
@@ -145,7 +148,7 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 		numGroups = std::clamp(numGroups, 10, 100'000);
 
 		void* args[] = {
-			&uniforms, &cptr_buffer, &cptr_framebuffer,
+			&uniforms, &cptr_buffer, &cptr_framebuffer, &cptr_heatmap,
 			&cptr_models, &cptr_numModels, 
 			&cptr_patches, &cptr_numPatches, 
 			&output_surf, &cptr_stats
@@ -172,7 +175,7 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 		numGroups = std::clamp(numGroups, 10, 100'000);
 
 		void* args[] = {
-			&uniforms, &cptr_buffer, &cptr_framebuffer, 
+			&uniforms, &cptr_buffer, &cptr_framebuffer, &cptr_heatmap,
 			&cptr_models, &cptr_numModels, 
 			&cptr_patches, &cptr_numPatches, 
 			&output_surf, &cptr_stats
@@ -263,7 +266,7 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 			numGroups = std::clamp(numGroups, 10, 100'000);
 
 			void* args[] = {
-				&uniforms, &cptr_buffer, &cptr_framebuffer,
+				&uniforms, &cptr_buffer, &cptr_framebuffer, &cptr_heatmap,
 				&cptr_models, &cptr_numModels, 
 				&cptr_patches, &cptr_numPatches, 
 				&output_surf, &cptr_stats
@@ -288,7 +291,7 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 			numGroups = std::clamp(numGroups, 10, 100'000);
 
 			void* args[] = {
-				&uniforms, &cptr_buffer, &cptr_framebuffer,
+				&uniforms, &cptr_buffer, &cptr_framebuffer, &cptr_heatmap,
 				&cptr_models, &cptr_numModels, 
 				&cptr_patches, &cptr_numPatches, 
 				&output_surf, &cptr_stats
@@ -319,7 +322,7 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 		numGroups = std::clamp(numGroups, 10, 100'000);
 
 		void* args[] = {
-			&uniforms, &cptr_buffer, &cptr_framebuffer,
+			&uniforms, &cptr_buffer, &cptr_framebuffer, &cptr_heatmap,
 			&cptr_models, &cptr_numModels, 
 			&cptr_patches, &cptr_numPatches, 
 			&output_surf, &cptr_stats
@@ -353,6 +356,7 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 void initCudaProgram(shared_ptr<GLRenderer> renderer){
 	cuMemAlloc(&cptr_buffer, 500'000'000);
 	cuMemAlloc(&cptr_framebuffer, 512'000'000); // up to 8000x8000 pixels
+	cuMemAlloc(&cptr_heatmap, 512'000'000); // up to 8000x8000 pixels
 	cuMemAlloc(&cptr_models, 10'000'000);
 	cuMemAlloc(&cptr_patches, 500'000'000);
 	cuMemAlloc(&cptr_numModels, 8);
@@ -527,6 +531,7 @@ int main(){
 			ImGui::Checkbox("Enable Refinement",       &settings.enableRefinement);
 			ImGui::Checkbox("lock frustum",            &settings.lockFrustum);
 			ImGui::Combo("Face/Patch Culling",         &settings.cullingMode, "None\0Cull back faces\0Cull front faces\0");
+			ImGui::Checkbox("Show Heatmap",            &settings.showHeatmap);
 
 			ImGui::Text("Method:");
 			ImGui::RadioButton("sampleperf test (100M samples)", &settings.method, METHOD_SAMPLEPERF_TEST);
