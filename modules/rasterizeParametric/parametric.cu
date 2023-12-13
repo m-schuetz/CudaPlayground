@@ -127,7 +127,7 @@ auto toScreen = [&](float3 p, Uniforms& uniforms){
 	return ndc;
 };
 
-auto toScreen_locked = [&](float3 p, Uniforms& uniforms){
+auto toScreen_locked = [&](float3 p, const Uniforms& uniforms){
 	float4 ndc = uniforms.locked_transform * float4{p.x, p.y, p.z, 1.0f};
 
 	ndc.x = ndc.x / ndc.w;
@@ -440,7 +440,7 @@ void generatePatches2(
 	Model* models, uint32_t* numModels, 
 	Patch* patches, uint32_t* numPatches, 
 	int threshold, 
-	Uniforms& uniforms, 
+	const Uniforms& uniforms, 
 	Stats* stats
 ){
 
