@@ -278,7 +278,7 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 				printf("error: %s \n", str);
 			}
 		}else if(settings.method == METHOD_RUNNIN_THRU){
-			int workgroupSize = 128;
+			int workgroupSize = 64;
 			int numGroups;
 			auto& kernel = cuda_program->kernels["kernel_rasterize_patches_runnin_thru"];
 			resultcode = cuOccupancyMaxActiveBlocksPerMultiprocessor(&numGroups, kernel, workgroupSize, 0);

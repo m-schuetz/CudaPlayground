@@ -872,11 +872,24 @@ void rasterizePatches_runnin_thru(
 			float t = (1.0f - vt) * t_min + vt * t_max;
 
 			float3 p = sample(s, t) + model.position;
+			float3 p_nx = sample(s + 0.0001f, t) + model.position;
+			float3 p_ny = sample(s, t + 0.0001f) + model.position;
+
+			float3 tx = normalize(p_nx - p);
+			float3 ty = normalize(p_ny - p);
+			float3 N = normalize(cross(ty, tx));
+
 			uint32_t color = 0x000000ff;
+			volatile uint8_t* rgba = (uint8_t*)&color;
+
 			float4 ps = toScreen(p, uniforms);
 
-
 			color = 1234567.0f * (123.0f + patch.s_min * patch.t_min);
+
+			rgba[0] = 200.0f * N.x;
+			rgba[1] = 200.0f * N.y;
+			rgba[2] = 200.0f * N.z;
+			rgba[3] = 255;
 
 			// if(p.x * p.y == 123.0f)
 			drawPoint(ps, framebuffer, color, uniforms);
@@ -906,17 +919,17 @@ void kernel_generate_scene(
 
 	if(grid.thread_rank() == 0){
 
-		// models[0] = {uniforms.model, float3{ 2.1, 0.0, -2.1}};
-		// models[1] = {uniforms.model, float3{ 0.0, 0.0, -2.1}};
-		// models[2] = {uniforms.model, float3{-2.1, 0.0, -2.1}};
+		// models[0] = {0, float3{ 2.1, 0.0, -2.1}};
+		// models[1] = {1, float3{ 0.0, 0.0, -2.1}};
+		// models[2] = {1, float3{-2.1, 0.0, -2.1}};
 
-		// models[3] = {uniforms.model, float3{ 2.1, 0.0, 0.0}};
-		// models[4] = {uniforms.model, float3{ 0.0, 0.0, 0.0}};
-		// models[5] = {uniforms.model, float3{-2.1, 0.0, 0.0}};
+		// models[3] = {3, float3{ 2.1, 0.0, 0.0}};
+		// models[4] = {4, float3{ 0.0, 0.0, 0.0}};
+		// models[5] = {0, float3{-2.1, 0.0, 0.0}};
 
-		// models[6] = {uniforms.model, float3{ 2.1, 0.0, 2.1}};
-		// models[7] = {uniforms.model, float3{ 0.0, 0.0, 2.1}};
-		// models[8] = {uniforms.model, float3{-2.1, 0.0, 2.1}};
+		// models[6] = {1, float3{ 2.1, 0.0, 2.1}};
+		// models[7] = {1, float3{ 0.0, 0.0, 2.1}};
+		// models[8] = {3, float3{-2.1, 0.0, 2.1}};
 
 		// *numModels = 9;
 
