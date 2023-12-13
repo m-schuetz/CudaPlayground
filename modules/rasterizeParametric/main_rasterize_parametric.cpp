@@ -512,8 +512,8 @@ int main(){
 
 		{ // SETTINGS WINDOW
 
-			ImGui::SetNextWindowPos(ImVec2(10, 280 + 240 + 10));
-			ImGui::SetNextWindowSize(ImVec2(490, 230));
+			ImGui::SetNextWindowPos(ImVec2(10, 280 + 240 + 10), ImGuiCond_FirstUseEver);
+			ImGui::SetNextWindowSize(ImVec2(490, 230), ImGuiCond_FirstUseEver);
 
 			ImGui::Begin("Settings");
 
