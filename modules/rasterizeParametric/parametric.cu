@@ -17,6 +17,9 @@ Uniforms uniforms;
 Allocator* allocator;
 
 constexpr float PI = 3.1415;
+constexpr float HALF_PI = PI * 0.5f;
+constexpr float QUARTER_PI = PI * 0.25f;
+constexpr float TWO_PI = 2.f * PI;
 constexpr uint32_t BACKGROUND_COLOR = 0x00332211ull;
 
 constexpr float sh_coefficients[91] = {
@@ -419,6 +422,69 @@ float3 sampleGlyph(float s, float t){
 	return xyz;
 };
 
+/** Moves the points onto the sphere surface
+ * \brief R2 -> R3 sphere
+ * \param u Expected input range: [0, PI]
+ * \param v Expected input range: [0, 2*PI]
+ * \return Position according to the parametric sphere equation
+ */
+float3 to_sphere(float u, float v) {
+	return float3{
+	    /* x: */ sinf(u) * cosf(v),
+	    /* y: */ sinf(u) * sinf(v),
+	    /* z: */ cosf(u)};
+}
+
+template<typename T> 
+void swap(T& t1, T& t2) {
+    T temp = std::move(t1);
+    t1 = std::move(t2);
+    t2 = std::move(temp);
+}
+
+// s, t in range 0 to 1!
+float3 sampleJohisHeart(float s, float t){
+	float u = PI * s;
+	float v = TWO_PI * t;
+
+	auto pos = to_sphere(u, v);
+
+	if (u < HALF_PI) {
+		pos.z *= 1.f - (cosf(sqrtf(sqrtf(abs(pos.x*PI*0.7f))))*0.8f);
+	}
+	else {
+		pos.x *= sinf(u) * sinf(u);
+	}
+	pos.x *= 0.9f;
+	pos.y *= 0.4f;
+
+	swap(pos.y, pos.z);
+
+	return pos;
+};
+
+// s, t in range 0 to 1!
+float3 sampleSpherehog(float s, float t){
+	float u = PI * s;
+	float v = TWO_PI * t;
+	
+	// Position:
+	auto pos = to_sphere(u, v);
+
+	constexpr float NUMSPIKES = 10.f;
+	constexpr float SPIKENARROWNESS = 100.f;
+	float spikeheight = 0.5f;
+
+	auto repeatU =  u / PI * NUMSPIKES - roundf(u / PI * NUMSPIKES );
+	auto repeatV = v / PI * NUMSPIKES - roundf(v / PI * NUMSPIKES );
+	auto d = repeatU*repeatU + repeatV*repeatV;
+	float r = 1.f + exp(-d * SPIKENARROWNESS) * spikeheight;
+
+	pos *= r;
+	swap(pos.y, pos.z);
+
+	return pos;
+};
 
 // sampleSinCos, samplePlane, sampleSphere;
 // auto sample = sampleSinCos;
@@ -433,6 +499,10 @@ auto getSampler(int model){
 			return sampleSphere;
 		case MODEL_GLYPH:
 			return sampleGlyph;
+		case JOHIS_HEART:
+			return sampleJohisHeart;
+		case SPHEREHOG:
+			return sampleSpherehog;
 		default:
 			return samplePlane;
 	}
