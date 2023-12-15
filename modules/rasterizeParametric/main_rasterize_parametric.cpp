@@ -30,7 +30,7 @@ struct{
 	double timeSinceLastFrame = 0.0;
 	bool lockFrustum          = false;
 	int cullingMode           = 0; // 0...None, 1...back faces, 2...front faces
-	bool showHeatmap          = false;
+	int showHeatmap           = 0; // 0...Not, 1...step of 1, 2...steps of 2, 3...steps of 3, 4...steps of 4, 5...steps of 5, 6...logarithmic
 } settings;
 
 float duration_scene;
@@ -531,7 +531,7 @@ int main(){
 			ImGui::Checkbox("Enable Refinement",       &settings.enableRefinement);
 			ImGui::Checkbox("lock frustum",            &settings.lockFrustum);
 			ImGui::Combo("Face/Patch Culling",         &settings.cullingMode, "None\0Cull back faces\0Cull front faces\0");
-			ImGui::Checkbox("Show Heatmap",            &settings.showHeatmap);
+			ImGui::Combo("Show Heatmap",               &settings.showHeatmap, "Do NOT show heatmap\0linear (bucket size 1, i.e. 0->10)\0linear (bucket size 2, i.e. 0->20)\0linear (bucket size 3, i.e. 0->30)\0linear (bucket size 4, i.e. 0->40)\0linear (bucket size 5, i.e. 0->50)\0logarithmic\0");
 
 			ImGui::Text("Method:");
 			ImGui::RadioButton("sampleperf test (100M samples)", &settings.method, METHOD_SAMPLEPERF_TEST);

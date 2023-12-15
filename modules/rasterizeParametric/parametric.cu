@@ -1100,9 +1100,12 @@ void kernel_framebuffer_to_OpenGL(
 		int x = pixelIndex % int(_uniforms.width);
 		int y = pixelIndex / int(_uniforms.width);
 
-		if (_uniforms.showHeatmap) {
+		if (_uniforms.showHeatmap > 0) {
 			auto inp = heatmap[pixelIndex];
-			inp = log2(float(inp));
+			if (_uniforms.showHeatmap >= 6)
+				inp = log2(float(inp));
+			else 
+				inp = inp / _uniforms.showHeatmap;
 			inp = clamp(inp, 0, MAX_HEATMAP_COLORS-1);
 			surf2Dwrite(heatmapColors[inp], gl_colorbuffer, x * 4, y);
 		}

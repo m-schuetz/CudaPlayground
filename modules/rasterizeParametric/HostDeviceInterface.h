@@ -123,7 +123,7 @@ struct Uniforms{
 	bool enableRefinement;
 	bool lockFrustum;
 	int  cullingMode;
-	bool showHeatmap;
+	int  showHeatmap;
 };
 
 struct Stats{
