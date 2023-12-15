@@ -1061,28 +1061,29 @@ void kernel_clear_framebuffer(
 	processRange(0, _uniforms.width * _uniforms.height, [&](int pixelIndex){
 		// framebuffer[pixelIndex] = 0x7f800000'00332211ull;
 		framebuffer[pixelIndex] = (uint64_t(Infinity) << 32ull) | uint64_t(BACKGROUND_COLOR);
+		heatmap[pixelIndex] = 0;
 	});
 
 }
 
 #define MAX_HEATMAP_COLORS 11
 constexpr uint32_t heatmapColors[MAX_HEATMAP_COLORS] = {
-    0xa50026ff,
-	0xd73027ff,
-	0xf46d43ff,
-	0xfdae61ff,
-	0xfee08bff,
-	0xffffbfff,
-	0xd9ef8bff,
-	0xa6d96aff,
-	0x66bd63ff,
-	0x1a9850ff,
-	0x006837ff
+    0x9e0142,
+    0xd53e4f,
+    0xf46d43,
+    0xfdae61,
+    0xfee08b,
+    0xffffbf,
+    0xe6f598,
+    0xabdda4,
+    0x66c2a5,
+    0x3288bd,
+    0x5e4fa2
 };
 
 extern "C" __global__
 void kernel_framebuffer_to_OpenGL(
-	const Uniforms& _uniforms,
+	const Uniforms _uniforms,
 	unsigned int* buffer,
 	uint64_t* framebuffer, uint64_t* heatmap, 
 	Model* models, uint32_t* numModels,
@@ -1099,16 +1100,17 @@ void kernel_framebuffer_to_OpenGL(
 		int x = pixelIndex % int(_uniforms.width);
 		int y = pixelIndex / int(_uniforms.width);
 
-		// if (_uniforms.showHeatmap) {
-		// 	auto inp = heatmap[pixelIndex];
-		// 	inp = clamp(inp, 0, MAX_HEATMAP_COLORS-1);
-		// 	surf2Dwrite(heatmapColors[inp], gl_colorbuffer, x * 4, y);
-		// }
-		// else {
+		if (_uniforms.showHeatmap) {
+			auto inp = heatmap[pixelIndex];
+			inp = log2(float(inp));
+			inp = clamp(inp, 0, MAX_HEATMAP_COLORS-1);
+			surf2Dwrite(heatmapColors[inp], gl_colorbuffer, x * 4, y);
+		}
+		else {
 			uint64_t encoded = framebuffer[pixelIndex];
 			uint32_t color = encoded & 0xffffffffull;
 			surf2Dwrite(color, gl_colorbuffer, x * 4, y);
-		// }
+		}
 	});
 
 	if(grid.thread_rank() == 0){
