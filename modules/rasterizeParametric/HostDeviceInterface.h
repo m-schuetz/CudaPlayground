@@ -103,6 +103,8 @@ constexpr int MODEL_FUNKY_PLANE            = 1;
 constexpr int MODEL_EXTRA_FUNKY_PLANE      = 2;
 constexpr int MODEL_SPHERE                 = 3;
 constexpr int MODEL_GLYPH                  = 4;
+constexpr int JOHIS_HEART                  = 5;
+constexpr int SPHEREHOG                    = 6;
 
 struct Uniforms{
 	float width;
@@ -122,6 +124,8 @@ struct Uniforms{
 	bool isPaused;
 	bool enableRefinement;
 	bool lockFrustum;
+	int  cullingMode;
+	int  showHeatmap;
 };
 
 struct Stats{

@@ -230,8 +230,15 @@ struct CudaModularProgram{
 
 		// {
 		// 	printf("link duration: %f ms \n", walltime);
-			printf("link error message: %s \n", error_log);
-			printf("link info message: %s \n", info_log);
+			if (strlen(error_log) <= 0) 
+				printf("link SUCCESS (i.e., no link error messages)\n");
+			else 
+				printf("link error message: %s \n", error_log);
+
+			if (strlen(info_log) <= 0)
+				printf("NO link info messages\n");
+			else
+				printf("link info message: %s \n", info_log);
 		// }
 
 		cu_checked(cuModuleLoadData(&mod, cubin));

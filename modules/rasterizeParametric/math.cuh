@@ -71,8 +71,8 @@ Plane createPlane(float x, float y, float z, float w){
 struct Frustum{
 	Plane planes[6];
 
-	static Frustum fromWorldViewProj(mat4 worldViewProj){
-		float* values = reinterpret_cast<float*>(&worldViewProj);
+	static Frustum fromWorldViewProj(const mat4& worldViewProj){
+		const float* values = reinterpret_cast<const float*>(&worldViewProj);
 
 		float m_0  = values[transposeIndex( 0)];
 		float m_1  = values[transposeIndex( 1)];
@@ -156,9 +156,9 @@ struct Frustum{
 	}
 };
 
-bool intersectsFrustum(mat4 worldViewProj, float3 wgMin, float3 wgMax){
+bool intersectsFrustum(const mat4& worldViewProj, float3 wgMin, float3 wgMax){
 
-	float* values = reinterpret_cast<float*>(&worldViewProj);
+	const float* values = reinterpret_cast<const float*>(&worldViewProj);
 
 	float m_0  = values[transposeIndex( 0)];
 	float m_1  = values[transposeIndex( 1)];

@@ -17,6 +17,9 @@ Uniforms uniforms;
 Allocator* allocator;
 
 constexpr float PI = 3.1415;
+constexpr float HALF_PI = PI * 0.5f;
+constexpr float QUARTER_PI = PI * 0.25f;
+constexpr float TWO_PI = 2.f * PI;
 constexpr uint32_t BACKGROUND_COLOR = 0x00332211ull;
 
 constexpr float sh_coefficients[91] = {
@@ -77,7 +80,7 @@ mat4 operator*(const mat4& a, const mat4& b){
 	return result;
 }
 
-void drawPoint(float4 coord, uint64_t* framebuffer, uint32_t color, Uniforms& uniforms){
+void drawPoint(float4 coord, uint64_t* framebuffer, uint64_t* heatmap,  uint32_t color, Uniforms& uniforms){
 
 	int x = coord.x;
 	int y = coord.y;
@@ -91,10 +94,12 @@ void drawPoint(float4 coord, uint64_t* framebuffer, uint32_t color, Uniforms& un
 		uint64_t encoded = (udepth << 32) | color;
 
 		atomicMin(&framebuffer[pixelID], encoded);
+
+		atomicAdd(&heatmap[pixelID], 1);
 	}
 }
 
-void drawSprite(float4 coord, uint64_t* framebuffer, uint32_t color, Uniforms& uniforms){
+void drawSprite(float4 coord, uint64_t* framebuffer, uint64_t* heatmap,  uint32_t color, Uniforms& uniforms){
 
 	int x = coord.x;
 	int y = coord.y;
@@ -127,7 +132,7 @@ auto toScreen = [&](float3 p, Uniforms& uniforms){
 	return ndc;
 };
 
-auto toScreen_locked = [&](float3 p, Uniforms& uniforms){
+auto toScreen_locked = [&](float3 p, const Uniforms& uniforms){
 	float4 ndc = uniforms.locked_transform * float4{p.x, p.y, p.z, 1.0f};
 
 	ndc.x = ndc.x / ndc.w;
@@ -417,6 +422,69 @@ float3 sampleGlyph(float s, float t){
 	return xyz;
 };
 
+/** Moves the points onto the sphere surface
+ * \brief R2 -> R3 sphere
+ * \param u Expected input range: [0, PI]
+ * \param v Expected input range: [0, 2*PI]
+ * \return Position according to the parametric sphere equation
+ */
+float3 to_sphere(float u, float v) {
+	return float3{
+	    /* x: */ sinf(u) * cosf(v),
+	    /* y: */ sinf(u) * sinf(v),
+	    /* z: */ cosf(u)};
+}
+
+template<typename T> 
+void swap(T& t1, T& t2) {
+    T temp = std::move(t1);
+    t1 = std::move(t2);
+    t2 = std::move(temp);
+}
+
+// s, t in range 0 to 1!
+float3 sampleJohisHeart(float s, float t){
+	float u = PI * s;
+	float v = TWO_PI * t;
+
+	auto pos = to_sphere(u, v);
+
+	if (u < HALF_PI) {
+		pos.z *= 1.f - (cosf(sqrtf(sqrtf(abs(pos.x*PI*0.7f))))*0.8f);
+	}
+	else {
+		pos.x *= sinf(u) * sinf(u);
+	}
+	pos.x *= 0.9f;
+	pos.y *= 0.4f;
+
+	swap(pos.y, pos.z);
+
+	return pos;
+};
+
+// s, t in range 0 to 1!
+float3 sampleSpherehog(float s, float t){
+	float u = PI * s;
+	float v = TWO_PI * t;
+	
+	// Position:
+	auto pos = to_sphere(u, v);
+
+	constexpr float NUMSPIKES = 10.f;
+	constexpr float SPIKENARROWNESS = 100.f;
+	float spikeheight = 0.5f;
+
+	auto repeatU =  u / PI * NUMSPIKES - roundf(u / PI * NUMSPIKES );
+	auto repeatV = v / PI * NUMSPIKES - roundf(v / PI * NUMSPIKES );
+	auto d = repeatU*repeatU + repeatV*repeatV;
+	float r = 1.f + exp(-d * SPIKENARROWNESS) * spikeheight;
+
+	pos *= r;
+	swap(pos.y, pos.z);
+
+	return pos;
+};
 
 // sampleSinCos, samplePlane, sampleSphere;
 // auto sample = sampleSinCos;
@@ -431,6 +499,10 @@ auto getSampler(int model){
 			return sampleSphere;
 		case MODEL_GLYPH:
 			return sampleGlyph;
+		case JOHIS_HEART:
+			return sampleJohisHeart;
+		case SPHEREHOG:
+			return sampleSpherehog;
 		default:
 			return samplePlane;
 	}
@@ -440,7 +512,7 @@ void generatePatches2(
 	Model* models, uint32_t* numModels, 
 	Patch* patches, uint32_t* numPatches, 
 	int threshold, 
-	Uniforms& uniforms, 
+	const Uniforms& uniforms, 
 	Stats* stats
 ){
 
@@ -471,7 +543,7 @@ void generatePatches2(
 
 	grid.sync();
 
-	// Create initial set of patches
+	// Create initial set of patches => divide whatever uv-parametric function we have into 8x8 tiles, then refine:
 	constexpr int initialPatchGridSize = 8;
 
 	for(int modelID = 0; modelID < *numModels; modelID++){
@@ -577,13 +649,19 @@ void generatePatches2(
 				// TODO: do backface culling here? 
 				// If the patch faces away from the camera, ignore it. 
 
-				// float3 t_01 = p_01 - p_00;
-				// float3 t_10 = p_10 - p_00;
-				// float3 N = normalize(cross(t_01, t_10));
-				// float3 N_v = make_float3(uniforms.view * float4{N.x, N.y, N.z, 0.0});
-				
-				// float a = dot(N_v, float3{0.0, 0.0, 1.0});
-				// if(a < 0.0) return;
+				if (uniforms.cullingMode > 0) {
+					float3 v_00 = make_float3(uniforms.view * uniforms.world * float4{p_00.x, p_00.y, p_00.z, 1.0f});
+					float3 v_01 = make_float3(uniforms.view * uniforms.world * float4{p_01.x, p_01.y, p_01.z, 1.0f});
+					float3 v_10 = make_float3(uniforms.view * uniforms.world * float4{p_10.x, p_10.y, p_10.z, 1.0f});
+					float3 t_01 = v_01 - v_00;
+					float3 t_10 = v_10 - v_00;
+					float3 v_n = normalize(cross(t_01, t_10));
+					constexpr float THRESHOLD = 0.4; // not 0 because displacement could make parts of the patch visible if it is nearly parallel to viewing direction
+					if (uniforms.cullingMode == 2) {
+						v_n = -v_n;
+					}
+					if (dot(v_n, v_00) > THRESHOLD && dot(v_n, v_01) > THRESHOLD && dot(v_n, v_10) > THRESHOLD) return;
+				}
 
 				uint32_t targetIndex = atomicAdd(numPatches, 1);
 
@@ -635,7 +713,7 @@ void generatePatches2(
 void rasterizePatches_32x32(
 	Model* models, uint32_t* numModels,
 	Patch* patches, uint32_t* numPatches, 
-	uint64_t* framebuffer, 
+	uint64_t* framebuffer, uint64_t* heatmap,  
 	Uniforms& uniforms,
 	Patch* newPatches, uint32_t* numNewPatches, 
 	bool createNewPatches
@@ -768,7 +846,7 @@ void rasterizePatches_32x32(
 		// drawSprite(ps, framebuffer, color, uniforms);
 
 		// if(N.x > 10.0)
-		drawPoint(ps, framebuffer, color, uniforms);
+		drawPoint(ps, framebuffer, heatmap, color, uniforms);
 
 		block.sync();
 
@@ -821,7 +899,7 @@ void rasterizePatches_32x32(
 void rasterizePatches_runnin_thru(
 	Model* models, uint32_t* numModels,
 	Patch* patches, uint32_t* numPatches,
-	uint64_t* framebuffer, 
+	uint64_t* framebuffer, uint64_t* heatmap,  
 	Uniforms& uniforms
 ){
 
@@ -892,7 +970,7 @@ void rasterizePatches_runnin_thru(
 			rgba[3] = 255;
 
 			// if(p.x * p.y == 123.0f)
-			drawPoint(ps, framebuffer, color, uniforms);
+			drawPoint(ps, framebuffer, heatmap, color, uniforms);
 
 		}
 
@@ -983,7 +1061,7 @@ extern "C" __global__
 void kernel_sampleperf_test(
 	const Uniforms _uniforms,
 	unsigned int* buffer,
-	uint64_t* framebuffer,
+	uint64_t* framebuffer, uint64_t* heatmap, 
 	Model* models, uint32_t* numModels,
 	Patch* patches, uint32_t* numPatches,
 	cudaSurfaceObject_t gl_colorbuffer,
@@ -1041,7 +1119,7 @@ extern "C" __global__
 void kernel_clear_framebuffer(
 	const Uniforms _uniforms,
 	unsigned int* buffer,
-	uint64_t* framebuffer,
+	uint64_t* framebuffer, uint64_t* heatmap, 
 	Model* models, uint32_t* numModels,
 	Patch* patches, uint32_t* numPatches,
 	cudaSurfaceObject_t gl_colorbuffer,
@@ -1053,15 +1131,31 @@ void kernel_clear_framebuffer(
 	processRange(0, _uniforms.width * _uniforms.height, [&](int pixelIndex){
 		// framebuffer[pixelIndex] = 0x7f800000'00332211ull;
 		framebuffer[pixelIndex] = (uint64_t(Infinity) << 32ull) | uint64_t(BACKGROUND_COLOR);
+		heatmap[pixelIndex] = 0;
 	});
 
 }
+
+#define MAX_HEATMAP_COLORS 11
+constexpr uint32_t heatmapColors[MAX_HEATMAP_COLORS] = {
+    0x9e0142,
+    0xd53e4f,
+    0xf46d43,
+    0xfdae61,
+    0xfee08b,
+    0xffffbf,
+    0xe6f598,
+    0xabdda4,
+    0x66c2a5,
+    0x3288bd,
+    0x5e4fa2
+};
 
 extern "C" __global__
 void kernel_framebuffer_to_OpenGL(
 	const Uniforms _uniforms,
 	unsigned int* buffer,
-	uint64_t* framebuffer,
+	uint64_t* framebuffer, uint64_t* heatmap, 
 	Model* models, uint32_t* numModels,
 	Patch* patches, uint32_t* numPatches,
 	cudaSurfaceObject_t gl_colorbuffer,
@@ -1076,10 +1170,20 @@ void kernel_framebuffer_to_OpenGL(
 		int x = pixelIndex % int(_uniforms.width);
 		int y = pixelIndex / int(_uniforms.width);
 
-		uint64_t encoded = framebuffer[pixelIndex];
-		uint32_t color = encoded & 0xffffffffull;
-
-		surf2Dwrite(color, gl_colorbuffer, x * 4, y);
+		if (_uniforms.showHeatmap > 0) {
+			auto inp = heatmap[pixelIndex];
+			if (_uniforms.showHeatmap >= 6)
+				inp = log2(float(inp));
+			else 
+				inp = inp / _uniforms.showHeatmap;
+			inp = clamp(inp, 0, MAX_HEATMAP_COLORS-1);
+			surf2Dwrite(heatmapColors[inp], gl_colorbuffer, x * 4, y);
+		}
+		else {
+			uint64_t encoded = framebuffer[pixelIndex];
+			uint32_t color = encoded & 0xffffffffull;
+			surf2Dwrite(color, gl_colorbuffer, x * 4, y);
+		}
 	});
 
 	if(grid.thread_rank() == 0){
@@ -1092,7 +1196,7 @@ extern "C" __global__
 void kernel_rasterize_patches_32x32(
 	const Uniforms _uniforms,
 	unsigned int* buffer,
-	uint64_t* framebuffer,
+	uint64_t* framebuffer, uint64_t* heatmap, 
 	Model* models, uint32_t* numModels,
 	Patch* patches, uint32_t* numPatches,
 	cudaSurfaceObject_t gl_colorbuffer,
@@ -1120,7 +1224,7 @@ void kernel_rasterize_patches_32x32(
 	rasterizePatches_32x32(
 		models, numModels,
 		patches, numPatches, 
-		framebuffer, 
+		framebuffer, heatmap,
 		uniforms,
 		newPatches, numNewPatches, true
 	);
@@ -1132,7 +1236,7 @@ void kernel_rasterize_patches_32x32(
 		rasterizePatches_32x32(
 			models, numModels,
 			newPatches, numNewPatches, 
-			framebuffer, 
+			framebuffer, heatmap,
 			uniforms,
 			patches, numPatches, false
 		);
@@ -1149,7 +1253,7 @@ extern "C" __global__
 void kernel_rasterize_patches_runnin_thru(
 	const Uniforms _uniforms,
 	unsigned int* buffer,
-	uint64_t* framebuffer,
+	uint64_t* framebuffer, uint64_t* heatmap, 
 	Model* models, uint32_t* numModels,
 	Patch* patches, uint32_t* numPatches,
 	cudaSurfaceObject_t gl_colorbuffer,
@@ -1164,7 +1268,7 @@ void kernel_rasterize_patches_runnin_thru(
 	allocator = &_allocator;
 
 	grid.sync();
-	rasterizePatches_runnin_thru(models, numModels, patches, numPatches, framebuffer, uniforms);
+	rasterizePatches_runnin_thru(models, numModels, patches, numPatches, framebuffer, heatmap, uniforms);
 
 }
 

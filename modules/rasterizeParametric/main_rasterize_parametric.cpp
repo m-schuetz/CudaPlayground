@@ -29,6 +29,8 @@ struct{
 	bool enableRefinement     = false;
 	double timeSinceLastFrame = 0.0;
 	bool lockFrustum          = false;
+	int cullingMode           = 0; // 0...None, 1...back faces, 2...front faces
+	int showHeatmap           = 0; // 0...Not, 1...step of 1, 2...steps of 2, 3...steps of 3, 4...steps of 4, 5...steps of 5, 6...logarithmic
 } settings;
 
 float duration_scene;
@@ -37,6 +39,7 @@ float duration_rasterization;
 
 CUdeviceptr cptr_buffer;
 CUdeviceptr cptr_framebuffer;
+CUdeviceptr cptr_heatmap;
 CUdeviceptr cptr_models, cptr_numModels;
 CUdeviceptr cptr_patches, cptr_numPatches;
 CUdeviceptr cptr_stats;
@@ -99,6 +102,8 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 	uniforms.isPaused = settings.isPaused;
 	uniforms.enableRefinement = settings.enableRefinement;
 	uniforms.lockFrustum = settings.lockFrustum;
+	uniforms.cullingMode = settings.cullingMode;
+	uniforms.showHeatmap = settings.showHeatmap;
 
 	glm::mat4 rotX = glm::rotate(glm::mat4(), 3.1415f * 0.5f, glm::vec3(1.0, 0.0, 0.0));
 
@@ -143,7 +148,7 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 		numGroups = std::clamp(numGroups, 10, 100'000);
 
 		void* args[] = {
-			&uniforms, &cptr_buffer, &cptr_framebuffer,
+			&uniforms, &cptr_buffer, &cptr_framebuffer, &cptr_heatmap,
 			&cptr_models, &cptr_numModels, 
 			&cptr_patches, &cptr_numPatches, 
 			&output_surf, &cptr_stats
@@ -170,7 +175,7 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 		numGroups = std::clamp(numGroups, 10, 100'000);
 
 		void* args[] = {
-			&uniforms, &cptr_buffer, &cptr_framebuffer, 
+			&uniforms, &cptr_buffer, &cptr_framebuffer, &cptr_heatmap,
 			&cptr_models, &cptr_numModels, 
 			&cptr_patches, &cptr_numPatches, 
 			&output_surf, &cptr_stats
@@ -261,7 +266,7 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 			numGroups = std::clamp(numGroups, 10, 100'000);
 
 			void* args[] = {
-				&uniforms, &cptr_buffer, &cptr_framebuffer,
+				&uniforms, &cptr_buffer, &cptr_framebuffer, &cptr_heatmap,
 				&cptr_models, &cptr_numModels, 
 				&cptr_patches, &cptr_numPatches, 
 				&output_surf, &cptr_stats
@@ -286,7 +291,7 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 			numGroups = std::clamp(numGroups, 10, 100'000);
 
 			void* args[] = {
-				&uniforms, &cptr_buffer, &cptr_framebuffer,
+				&uniforms, &cptr_buffer, &cptr_framebuffer, &cptr_heatmap,
 				&cptr_models, &cptr_numModels, 
 				&cptr_patches, &cptr_numPatches, 
 				&output_surf, &cptr_stats
@@ -317,7 +322,7 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 		numGroups = std::clamp(numGroups, 10, 100'000);
 
 		void* args[] = {
-			&uniforms, &cptr_buffer, &cptr_framebuffer,
+			&uniforms, &cptr_buffer, &cptr_framebuffer, &cptr_heatmap,
 			&cptr_models, &cptr_numModels, 
 			&cptr_patches, &cptr_numPatches, 
 			&output_surf, &cptr_stats
@@ -351,6 +356,7 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 void initCudaProgram(shared_ptr<GLRenderer> renderer){
 	cuMemAlloc(&cptr_buffer, 500'000'000);
 	cuMemAlloc(&cptr_framebuffer, 512'000'000); // up to 8000x8000 pixels
+	cuMemAlloc(&cptr_heatmap, 512'000'000); // up to 8000x8000 pixels
 	cuMemAlloc(&cptr_models, 10'000'000);
 	cuMemAlloc(&cptr_patches, 500'000'000);
 	cuMemAlloc(&cptr_numModels, 8);
@@ -512,8 +518,8 @@ int main(){
 
 		{ // SETTINGS WINDOW
 
-			ImGui::SetNextWindowPos(ImVec2(10, 280 + 240 + 10));
-			ImGui::SetNextWindowSize(ImVec2(490, 230));
+			ImGui::SetNextWindowPos(ImVec2(10, 280 + 240 + 10), ImGuiCond_FirstUseEver);
+			ImGui::SetNextWindowSize(ImVec2(490, 230), ImGuiCond_FirstUseEver);
 
 			ImGui::Begin("Settings");
 
@@ -522,8 +528,10 @@ int main(){
 				settings.isPaused = !settings.isPaused;
 			}
 
-			ImGui::Checkbox("Enable Refinement",     &settings.enableRefinement);
-			ImGui::Checkbox("lock frustum",          &settings.lockFrustum);
+			ImGui::Checkbox("Enable Refinement",       &settings.enableRefinement);
+			ImGui::Checkbox("lock frustum",            &settings.lockFrustum);
+			ImGui::Combo("Face/Patch Culling",         &settings.cullingMode, "None\0Cull back faces\0Cull front faces\0");
+			ImGui::Combo("Show Heatmap",               &settings.showHeatmap, "Do NOT show heatmap\0linear (bucket size 1, i.e. 0->10)\0linear (bucket size 2, i.e. 0->20)\0linear (bucket size 3, i.e. 0->30)\0linear (bucket size 4, i.e. 0->40)\0linear (bucket size 5, i.e. 0->50)\0logarithmic\0");
 
 			ImGui::Text("Method:");
 			ImGui::RadioButton("sampleperf test (100M samples)", &settings.method, METHOD_SAMPLEPERF_TEST);
@@ -536,6 +544,8 @@ int main(){
 			ImGui::RadioButton("Extra Funky Plane", &settings.model, MODEL_EXTRA_FUNKY_PLANE);
 			ImGui::RadioButton("Sphere", &settings.model, MODEL_SPHERE);
 			ImGui::RadioButton("Glyph", &settings.model, MODEL_GLYPH);
+			ImGui::RadioButton("Johi's Heart", &settings.model, JOHIS_HEART);
+			ImGui::RadioButton("Spherehog", &settings.model, SPHEREHOG);
 
 			ImGui::End();
 		}
