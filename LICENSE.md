@@ -1,21 +1,9 @@
-=====================================================================
+Copyright 2023 Markus Schütz
 
-Copyright 2023 Markus Schütz and Bernhard Kerbl
+CudaPlayground projects and files have varying licenses. Make sure to check the license of code you want to use! 
 
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
-=====================================================================
-
-Some files have special licenses, such as seascape.cu: 
-
-/*
- * "Seascape" by Alexander Alekseev aka TDM - 2014
- * License Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Unported License.
- * Contact: tdmaav@gmail.com
- */
-
-=====================================================================
+- modules/cuda_laszip: Apache 
+    - The code is a CUDA adaption of Martin Isenburg's LASzip
+    - https://github.com/LASzip/LASzip/blob/master/COPYING
+- Some files (e.g. seascape.cu) have license infos at the beginning, mainly because they contain adapted code
+- everything else: MIT (https://opensource.org/license/mit/)

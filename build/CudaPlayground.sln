@@ -17,6 +17,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Cuda_OpenGL_VR", "CudaOpenG
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "CUDA_OpenGL_RasterizeVoxels", "RasterizeVoxels.vcxproj", "{FAFEC3CA-6864-40B3-A27D-3F37326298D4}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "CudaLaszip", "CudaLaszip.vcxproj", "{0AB26AE7-6839-4783-AFAF-9A60D8F62F0A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -141,6 +143,22 @@ Global
 		{FAFEC3CA-6864-40B3-A27D-3F37326298D4}.RelWithDebInfo|x64.Build.0 = Release|x64
 		{FAFEC3CA-6864-40B3-A27D-3F37326298D4}.RelWithDebInfo|x86.ActiveCfg = Release|Win32
 		{FAFEC3CA-6864-40B3-A27D-3F37326298D4}.RelWithDebInfo|x86.Build.0 = Release|Win32
+		{0AB26AE7-6839-4783-AFAF-9A60D8F62F0A}.Debug|x64.ActiveCfg = Debug|x64
+		{0AB26AE7-6839-4783-AFAF-9A60D8F62F0A}.Debug|x64.Build.0 = Debug|x64
+		{0AB26AE7-6839-4783-AFAF-9A60D8F62F0A}.Debug|x86.ActiveCfg = Debug|Win32
+		{0AB26AE7-6839-4783-AFAF-9A60D8F62F0A}.Debug|x86.Build.0 = Debug|Win32
+		{0AB26AE7-6839-4783-AFAF-9A60D8F62F0A}.MinSizeRel|x64.ActiveCfg = Release|x64
+		{0AB26AE7-6839-4783-AFAF-9A60D8F62F0A}.MinSizeRel|x64.Build.0 = Release|x64
+		{0AB26AE7-6839-4783-AFAF-9A60D8F62F0A}.MinSizeRel|x86.ActiveCfg = Debug|Win32
+		{0AB26AE7-6839-4783-AFAF-9A60D8F62F0A}.MinSizeRel|x86.Build.0 = Debug|Win32
+		{0AB26AE7-6839-4783-AFAF-9A60D8F62F0A}.Release|x64.ActiveCfg = Release|x64
+		{0AB26AE7-6839-4783-AFAF-9A60D8F62F0A}.Release|x64.Build.0 = Release|x64
+		{0AB26AE7-6839-4783-AFAF-9A60D8F62F0A}.Release|x86.ActiveCfg = Release|Win32
+		{0AB26AE7-6839-4783-AFAF-9A60D8F62F0A}.Release|x86.Build.0 = Release|Win32
+		{0AB26AE7-6839-4783-AFAF-9A60D8F62F0A}.RelWithDebInfo|x64.ActiveCfg = Release|x64
+		{0AB26AE7-6839-4783-AFAF-9A60D8F62F0A}.RelWithDebInfo|x64.Build.0 = Release|x64
+		{0AB26AE7-6839-4783-AFAF-9A60D8F62F0A}.RelWithDebInfo|x86.ActiveCfg = Release|Win32
+		{0AB26AE7-6839-4783-AFAF-9A60D8F62F0A}.RelWithDebInfo|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
