@@ -12,12 +12,20 @@
 
 #include "CudaModularProgram.h"
 
+#include "HostDeviceInterface.h"
 #include "unsuck.hpp"
+
+#include "ArithmeticDecoder.cuh"
+#include "testLaszipClasses.h"
 
 using namespace std;
 
 CUdeviceptr cptr_buffer, cptr_input;
 CudaModularProgram* cuda_program = nullptr;
+
+// string lazfile = "E:/dev/pointclouds/archpro/heidentor.laz";
+string lazfile = "E:/resources/pointclouds/archpro/heidentor.laz";
+int64_t lazByteSize = 0;
 
 void initCuda(){
 	cuInit(0);
@@ -28,8 +36,8 @@ void initCuda(){
 }
 
 void loadData(){
-	string lazfile = "E:/dev/pointclouds/archpro/heidentor.laz";
 	auto lazbuffer = readBinaryFile(lazfile);
+	lazByteSize = lazbuffer->size;
 
 	auto result = cuMemAlloc(&cptr_input, lazbuffer->size);
 
@@ -39,6 +47,15 @@ void loadData(){
 
 	cuMemcpyHtoD(cptr_input, lazbuffer->data, lazbuffer->size);
 }
+
+// void testLaszipClasses(string path){
+// 	auto lazbuffer = readBinaryFile(lazfile);
+
+
+
+
+// 	ArithmeticDecoder ac(buffer, offset);
+// }
 
 void runCudaProgram(){
 
@@ -67,7 +84,10 @@ void runCudaProgram(){
 
 	cuEventRecord(cevent_start, 0);
 
-	void* args[] = {&cptr_buffer, &cptr_input};
+	Uniforms uniforms;
+	uniforms.lazByteSize = lazByteSize;
+
+	void* args[] = {&uniforms, &cptr_buffer, &cptr_input};
 
 	auto res_launch = cuLaunchCooperativeKernel(cuda_program->kernels["kernel"],
 		numGroups, 1, 1,
@@ -135,6 +155,8 @@ int main(){
 	initCudaProgram();
 
 	loadData();
+
+	testLaszipClasses::run(lazfile);
 
 	runCudaProgram();
 
