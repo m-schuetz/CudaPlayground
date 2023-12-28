@@ -15,12 +15,14 @@
 #include "HostDeviceInterface.h"
 #include "unsuck.hpp"
 
-#include "ArithmeticDecoder.cuh"
-#include "testLaszipClasses.h"
+//#include "ArithmeticDecoder.cuh"
+//#include "testLaszipClasses.h"
 
 using namespace std;
 
 CUdeviceptr cptr_buffer, cptr_input;
+CUdeviceptr cptr_chunks, cptr_numChunks;
+CUdeviceptr cptr_lasheader;
 CudaModularProgram* cuda_program = nullptr;
 
 // string lazfile = "E:/dev/pointclouds/archpro/heidentor.laz";
@@ -87,17 +89,36 @@ void runCudaProgram(){
 	Uniforms uniforms;
 	uniforms.lazByteSize = lazByteSize;
 
-	void* args[] = {&uniforms, &cptr_buffer, &cptr_input};
+	void* args[] = {
+		&uniforms, &cptr_buffer, &cptr_input, 
+		&cptr_lasheader, 
+		&cptr_chunks, &cptr_numChunks
+	};
 
-	auto res_launch = cuLaunchCooperativeKernel(cuda_program->kernels["kernel"],
-		numGroups, 1, 1,
-		workgroupSize, 1, 1,
-		0, 0, args);
+	{ // LAUNCH KERNEL READ CHUNK INFOS
+		auto res_launch = cuLaunchCooperativeKernel(cuda_program->kernels["kernel_read_chunk_infos"],
+			numGroups, 1, 1,
+			workgroupSize, 1, 1,
+			0, 0, args);
 
-	if(res_launch != CUDA_SUCCESS){
-		const char* str; 
-		cuGetErrorString(res_launch, &str);
-		printf("error: %s \n", str);
+		if(res_launch != CUDA_SUCCESS){
+			const char* str; 
+			cuGetErrorString(res_launch, &str);
+			printf("error: %s \n", str);
+		}
+	}
+	
+	{ // LAUNCH KERNEL
+		auto res_launch = cuLaunchCooperativeKernel(cuda_program->kernels["kernel"],
+			numGroups, 1, 1,
+			workgroupSize, 1, 1,
+			0, 0, args);
+
+		if(res_launch != CUDA_SUCCESS){
+			const char* str; 
+			cuGetErrorString(res_launch, &str);
+			printf("error: %s \n", str);
+		}
 	}
 
 	cuEventRecord(cevent_end, 0);
@@ -113,22 +134,16 @@ void runCudaProgram(){
 
 	cuCtxSynchronize();
 
-	// Buffer buffer(100);
-	// cuMemcpyDtoH(buffer.data, cptr_buffer, buffer.size);
-
-	// cout << "print generated random values from host: ";
-	// for(int i = 0; i < 10; i++){
-	// 	cout << buffer.get<uint32_t>(4 * i) << ", ";
-	// }
-	// cout << " ..." << endl;
-
 }
 
 void initCudaProgram(){
 
-	cuMemAlloc(&cptr_buffer, 100'000'000);
+	cuMemAlloc(&cptr_buffer, 1'000'000'000);
+	cuMemAlloc(&cptr_chunks, 16'000'000);
+	cuMemAlloc(&cptr_numChunks, 8);
+	cuMemAlloc(&cptr_lasheader, 4096);
+	
 	// cuMemAlloc(&cptr_input, 100'000'000);
-
 	// cuMemcpyHtoD(cptr_input, input.data(), input.size() * sizeof(int));
 
 	cuda_program = new CudaModularProgram({
@@ -136,7 +151,10 @@ void initCudaProgram(){
 			"./modules/cuda_laszip/cuda_laszip.cu",
 			"./modules/cuda_laszip/utils.cu",
 		},
-		.kernels = {"kernel"}
+		.kernels = {
+			"kernel",
+			"kernel_read_chunk_infos"
+		}
 	});
 
 	cuda_program->onCompile([&](){
@@ -156,7 +174,7 @@ int main(){
 
 	loadData();
 
-	testLaszipClasses::run(lazfile);
+	//testLaszipClasses::run(lazfile);
 
 	runCudaProgram();
 

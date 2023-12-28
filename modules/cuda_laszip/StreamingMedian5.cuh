@@ -7,94 +7,68 @@
 struct StreamingMedian5{
 	int32_t values[5];
 	bool high;
-	void init()
-	{
+
+	void init(){
 		values[0] = values[1] = values[2] = values[3] = values[4] = 0;
 		high = true;
 	}
-	inline void add(int32_t v)
-	{
-		if (high)
-		{
-		if (v < values[2])
-		{
-			values[4] = values[3];
-			values[3] = values[2];
-			if (v < values[0])
-			{
-			values[2] = values[1];
-			values[1] = values[0];
-			values[0] = v;
+
+	inline void add(int32_t v){
+		if (high){
+			if (v < values[2]){
+				values[4] = values[3];
+				values[3] = values[2];
+				if (v < values[0]){
+					values[2] = values[1];
+					values[1] = values[0];
+					values[0] = v;
+				}else if (v < values[1]){
+					values[2] = values[1];
+					values[1] = v;
+				}else{
+					values[2] = v;
+				}
+			}else{
+				if (v < values[3]){
+					values[4] = values[3];
+					values[3] = v;
+				}else{
+					values[4] = v;
+				}
+				high = false;
 			}
-			else if (v < values[1])
-			{
-			values[2] = values[1];
-			values[1] = v;
+		}else{
+			if (values[2] < v){
+				values[0] = values[1];
+				values[1] = values[2];
+
+				if (values[4] < v){
+					values[2] = values[3];
+					values[3] = values[4];
+					values[4] = v;
+				}else if (values[3] < v){
+					values[2] = values[3];
+					values[3] = v;
+				}else{
+					values[2] = v;
+				}
+			}else{
+				if (values[1] < v){
+					values[0] = values[1];
+					values[1] = v;
+				}else{
+					values[0] = v;
+				}
+				high = true;
 			}
-			else
-			{
-			values[2] = v;
-			}
-		}
-		else
-		{
-			if (v < values[3])
-			{
-			values[4] = values[3];
-			values[3] = v;
-			}
-			else
-			{
-			values[4] = v;
-			}
-			high = false;
-		}
-		}
-		else
-		{
-		if (values[2] < v)
-		{
-			values[0] = values[1];
-			values[1] = values[2];
-			if (values[4] < v)
-			{
-			values[2] = values[3];
-			values[3] = values[4];
-			values[4] = v;
-			}
-			else if (values[3] < v)
-			{
-			values[2] = values[3];
-			values[3] = v;
-			}
-			else
-			{
-			values[2] = v;
-			}
-		}
-		else
-		{
-			if (values[1] < v)
-			{
-			values[0] = values[1];
-			values[1] = v;
-			}
-			else
-			{
-			values[0] = v;
-			}
-			high = true;
-		}
 		}
 	}
 
-	int32_t get() const
-	{
+	int32_t get() const{
 		return values[2];
 	}
 
-	StreamingMedian5()
-	{
+	StreamingMedian5(){
 		init();
 	}
 };

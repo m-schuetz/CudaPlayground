@@ -41,7 +41,7 @@ struct ArithmeticModel{
 		if (distribution) delete [] distribution;
 	}
 
-	int32_t init(uint32_t* table){
+	int32_t init(uint32_t* table, AllocatorGlobal* allocator){
 
 		if (distribution == 0){
 
@@ -53,16 +53,21 @@ struct ArithmeticModel{
 
 			if ((!compress) && (symbols > 16)){
 				uint32_t table_bits = 3;
-				while (symbols > (1U << (table_bits + 2))) ++table_bits;
+
+				while (symbols > (1U << (table_bits + 2))){
+					 ++table_bits;
+				}
+
 				table_size  = 1 << table_bits;
 				table_shift = DM__LengthShift - table_bits;
-				distribution = new uint32_t[2*symbols+table_size+2];
+
+				distribution = allocator->alloc<uint32_t>(2 * symbols + table_size + 2);
 				decoder_table = distribution + 2 * symbols;
 			}else {
 				// small alphabet: no table needed
 				decoder_table = 0;
 				table_size = table_shift = 0;
-				distribution = new uint32_t[2*symbols];
+				distribution = allocator->alloc<uint32_t>(2 * symbols);
 			}
 			
 			if (distribution == 0){
@@ -74,10 +79,11 @@ struct ArithmeticModel{
 		total_count = 0;
 		update_cycle = symbols;
 
-		if (table)
+		if (table){
 			for (uint32_t k = 0; k < symbols; k++) symbol_count[k] = table[k];
-		else
+		}else{
 			for (uint32_t k = 0; k < symbols; k++) symbol_count[k] = 1;
+		}
 
 		update();
 

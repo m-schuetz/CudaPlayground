@@ -2,6 +2,7 @@
 #include <cooperative_groups.h>
 
 #include "utils.cuh"
+#include "utils_hd.cuh"
 #include "HostDeviceInterface.h"
 
 #include "ArithmeticDecoder.cuh"
@@ -33,6 +34,8 @@ struct LasHeader{
 	double3 min;
 	double3 max;
 };
+
+
 
 struct LaszipVlrItem{
 	uint16_t type;
@@ -125,33 +128,34 @@ LaszipVlr parseLaszipVlr(uint8_t* buffer){
 }
 
 extern "C" __global__
-void kernel(
+void kernel_read_chunk_infos(
 	Uniforms uniforms,
-	unsigned int* buffer,
-	uint8_t* input
+	uint8_t* buffer,
+	uint8_t* input,
+	LasHeader* lasheader,
+	Chunk* chunks,
+	uint32_t* numChunks
 ){
 	auto grid = cg::this_grid();
 	auto block = cg::this_thread_block();
 
-	// allows allocating bytes from buffer
-	Allocator allocator(buffer, 0);
-
+	AllocatorGlobal* g_allocator = (AllocatorGlobal*)buffer;
 
 	if(grid.thread_rank() == 0){
-		printf("cuda test \n");
-		printf("input: %llu \n", input);
+		g_allocator->buffer = buffer;
+		g_allocator->offset = 16;
+	}
 
-		LasHeader header = readLasHeader(input);
+	// __shared__ LasHeader sh_header;
+
+	if(grid.thread_rank() == 0){
+		// sh_header = readLasHeader(input);
+		*lasheader = readLasHeader(input);
 		LaszipVlr laszipvlr;
 
-		printf("numVLRs: %i \n", header.numVLRs);
-		printf("recordLength: %i \n", header.recordLength);
-		printf("min: %.2f, %.2f, %.2f \n", float(header.min.x), float(header.min.y), float(header.min.z));
-		printf("max: %.2f, %.2f, %.2f \n", float(header.max.x), float(header.max.y), float(header.max.z));
-
 		// READ LASZIP VLR
-		uint64_t byteOffset = header.headerSize;
-		for(int i = 0; i < header.numVLRs; i++){
+		uint64_t byteOffset = lasheader->headerSize;
+		for(int i = 0; i < lasheader->numVLRs; i++){
 			uint32_t recordId = readAs<uint16_t>(input, byteOffset + 18);
 			uint32_t recordLength = readAs<uint16_t>(input, byteOffset + 20);
 
@@ -159,114 +163,139 @@ void kernel(
 				laszipvlr = parseLaszipVlr(input + byteOffset + 54);
 			}
 
-			// printf("vlr recordId: %i \n", recordId);
-			// printf("vlr recordLength: %i \n", recordLength);
-
 			byteOffset = byteOffset + 54 + recordLength;
 		}
-
-		printf("compressor            %i \n", laszipvlr.compressor);
-		printf("coder                 %i \n", laszipvlr.coder);
-		printf("versionMajor          %i \n", laszipvlr.versionMajor);
-		printf("versionMinor          %i \n", laszipvlr.versionMinor);
-		printf("versionRevision       %i \n", laszipvlr.versionRevision);
-		printf("options               %i \n", laszipvlr.options);
-		printf("chunkSize             %i \n", laszipvlr.chunkSize);
-		printf("numberOfSpecialEvlrs  %i \n", laszipvlr.numberOfSpecialEvlrs);
-		printf("offsetToSpecialEvlrs  %i \n", laszipvlr.offsetToSpecialEvlrs);
-		printf("numItems              %i \n", laszipvlr.numItems);
 
 		// READ CHUNK TABLE
 		// see lasreadpoint.cpp; read_chunk_table()
 		int64_t chunkTableStart = readAs<uint64_t>(input, byteOffset);
 		int64_t chunkTableSize = uniforms.lazByteSize - chunkTableStart;
 		uint8_t* chunkTableBuffer = input + chunkTableStart;
-
 		uint32_t version = readAs<uint32_t>(chunkTableBuffer, 0);
 		uint32_t numChunks = readAs<uint32_t>(chunkTableBuffer, 4);
 
-		printf("chunkTableStart: %lli \n", chunkTableStart);
-		printf("chunkTableSize:  %lli \n", chunkTableSize);
-		printf("version:  %lli \n", version);
-		printf("numChunks:  %lli \n", numChunks);
+		ArithmeticDecoder* dec = g_allocator->alloc<ArithmeticDecoder>(1);
+		*dec = ArithmeticDecoder(chunkTableBuffer, 8);
 
-		auto dec = new ArithmeticDecoder(chunkTableBuffer, 8);
-		auto ic = new IntegerCompressor(dec, 32, 2);
-		ic->initDecompressor();
+		IntegerCompressor* ic = g_allocator->alloc<IntegerCompressor>(1);
+		*ic = IntegerCompressor(dec, 32, 2);
+		ic->initDecompressor(g_allocator);
 
-		int32_t* chunk_sizes = (int32_t * )malloc(4 * numChunks);
-		for (int i = 0; i < numChunks; i++) chunk_sizes[i] = 0;
+		// int32_t* chunk_sizes = (int32_t*)g_allocator->alloc(4 * numChunks);
+		// for (int i = 0; i < numChunks; i++) chunk_sizes[i] = 0;
 
 		// read chunk byte sizes
 		for (int i = 0; i < numChunks; i++) {
-			int pred = (i == 0) ? 0 : chunk_sizes[i - 1];
+			int pred = (i == 0) ? 0 : chunks[i - 1].byteSize;
 			int chunk_size = ic->decompress(pred, 1);
-			chunk_sizes[i] = chunk_size;
+			chunks[i].byteSize = chunk_size;
 		}
 
 		int64_t firstChunkOffset = byteOffset + 8;
 
-		int64_t* chunk_starts = (int64_t*)malloc(8 * numChunks);
-		chunk_starts[0] = firstChunkOffset;
+		// int64_t* chunk_starts = (int64_t*)malloc(8 * numChunks);
+		chunks[0].byteOffset = firstChunkOffset;
+		// chunk_starts[0] = firstChunkOffset;
 		for (int i = 1; i <= numChunks; i++) {
-			int64_t chunkStart = chunk_starts[i - 1] + int64_t(chunk_sizes[i - 1]);
-			chunk_starts[i] = chunkStart;
+			int64_t chunkStart = chunks[i - 1].byteOffset + int64_t(chunks[i - 1].byteSize);
+			chunks[i].byteOffset = chunkStart;
 		}
 
-		{
+		// printf("chunks[0].byteOffset: %llu \n", chunks[0].byteOffset);
 
-			int chunkIndex = 0;
-			int64_t chunkStart = chunk_starts[chunkIndex];
-			uint8_t* chunkBuffer = input + chunkStart;
-			int X = readAs<int32_t>(input, chunkStart + 0);
-			int Y = readAs<int32_t>(input, chunkStart + 4);
-			int Z = readAs<int32_t>(input, chunkStart + 8);
+	}
+}
 
-			uint16_t R = readAs<uint16_t>(input, chunkStart + 20);
-			uint16_t G = readAs<uint16_t>(input, chunkStart + 22);
-			uint16_t B = readAs<uint16_t>(input, chunkStart + 24);
+extern "C" __global__
+void kernel(
+	Uniforms uniforms,
+	uint8_t* buffer,
+	uint8_t* input,
+	LasHeader* lasheader,
+	Chunk* chunks,
+	uint32_t* numChunks
+){
+	auto grid = cg::this_grid();
+	auto block = cg::this_thread_block();
 
-			// Now start decompressing further points
-			auto dec = new ArithmeticDecoder(chunkBuffer, header.recordLength);
-			auto readerPoint10 = new LASreadItemCompressed_POINT10_v2(dec);
-			auto readerRgb12 = new LASreadItemCompressed_RGB12_v2(dec);
+	AllocatorGlobal* g_allocator = (AllocatorGlobal*)buffer;
 
-			uint32_t context = 0;
-			uint8_t itemPoint10[20] = { 0 };
-			memcpy(itemPoint10 + 0, &X, 4);
-			memcpy(itemPoint10 + 4, &Y, 4);
-			memcpy(itemPoint10 + 8, &Z, 4);
-			readerPoint10->init(itemPoint10, context);
+	if(grid.thread_rank() == 0){
+		g_allocator->buffer = buffer;
+		g_allocator->offset = 16;
+	}
 
+	int chunkIndex = 0;
+	Chunk chunk = chunks[chunkIndex];
 
-			uint8_t itemRgb12[6] = { 0 };
-			memcpy(itemRgb12 + 0, &R, 2);
-			memcpy(itemRgb12 + 2, &G, 2);
-			memcpy(itemRgb12 + 4, &B, 2);
-			readerRgb12->init(itemRgb12, context);
+	if(grid.thread_rank() == 0){
 
-			for (int i = 0; i < 10; i++) {
-				
-				readerPoint10->read(itemPoint10, context);
-				readerRgb12->read(itemRgb12, context);
+		uint64_t t_start = nanotime();
 
-				int32_t X = readAs<int32_t>(itemPoint10, 0);
-				int32_t Y = readAs<int32_t>(itemPoint10, 4);
-				int32_t Z = readAs<int32_t>(itemPoint10, 8);
+		int chunkIndex = 0;
+		Chunk chunk = chunks[chunkIndex];
+		
+		uint64_t start_offset = g_allocator->offset;
 
-				uint16_t R = readAs<uint16_t>(itemRgb12, 0);
-				uint16_t G = readAs<uint16_t>(itemRgb12, 2);
-				uint16_t B = readAs<uint16_t>(itemRgb12, 4);
+		// First point is uncompressed 
+		uint8_t* chunkBuffer = input + chunk.byteOffset;
+		int X = readAs<int32_t>(input, chunk.byteOffset + 0);
+		int Y = readAs<int32_t>(input, chunk.byteOffset + 4);
+		int Z = readAs<int32_t>(input, chunk.byteOffset + 8);
 
-				// printfmt("{}, {}, {}   -   {}, {}, {} \n", X, Y, Z, R, G, B);
+		uint16_t R = readAs<uint16_t>(input, chunk.byteOffset + 20);
+		uint16_t G = readAs<uint16_t>(input, chunk.byteOffset + 22);
+		uint16_t B = readAs<uint16_t>(input, chunk.byteOffset + 24);
 
+		// Now start decompressing further points
+		auto dec = new ArithmeticDecoder(chunkBuffer, lasheader->recordLength);
+		auto readerPoint10 = g_allocator->alloc<LASreadItemCompressed_POINT10_v2>(1);
+		auto readerRgb12   = g_allocator->alloc<LASreadItemCompressed_RGB12_v2>(1);
+
+		// printf("%i, %i, %i    -    %i, %i, %i \n", X, Y, Z, R, G, B);
+
+		uint32_t context = 0;
+		uint8_t itemPoint10[20] = { 0 };
+		memcpy(itemPoint10 + 0, &X, 4);
+		memcpy(itemPoint10 + 4, &Y, 4);
+		memcpy(itemPoint10 + 8, &Z, 4);
+
+		uint8_t itemRgb12[6] = { 0 };
+		memcpy(itemRgb12 + 0, &R, 2);
+		memcpy(itemRgb12 + 2, &G, 2);
+		memcpy(itemRgb12 + 4, &B, 2);
+		
+		readerPoint10->init(dec, itemPoint10, context, g_allocator);
+		readerRgb12->init(dec, itemRgb12, context, g_allocator);
+
+		for (int i = 1; i < 50'000; i++) {
+			
+			readerPoint10->read(itemPoint10, context, g_allocator);
+			readerRgb12->read(itemRgb12, context);
+
+			int32_t X = readAs<int32_t>(itemPoint10, 0);
+			int32_t Y = readAs<int32_t>(itemPoint10, 4);
+			int32_t Z = readAs<int32_t>(itemPoint10, 8);
+
+			uint16_t R = readAs<uint16_t>(itemRgb12, 0);
+			uint16_t G = readAs<uint16_t>(itemRgb12, 2);
+			uint16_t B = readAs<uint16_t>(itemRgb12, 4);
+
+			if(i < 5 || i == 49'999)
 				printf("%i, %i, %i    -    %i, %i, %i \n", X, Y, Z, R, G, B);
-
-				int a = 10;
-			}
-
-
 		}
+
+		uint64_t t_end = nanotime();
+		uint64_t nanos = t_end - t_start;
+		float millies = double(nanos) / 1'000'000.0;
+
+		// printf("duration: %.3f ms \n", millies);
+
+		uint64_t end_offset = g_allocator->offset;
+		uint64_t allocatedBytes = end_offset - start_offset;
+		printf("allocatedBytes: %i kb \n", allocatedBytes / 1000);
+
+	
 
 	}
 
