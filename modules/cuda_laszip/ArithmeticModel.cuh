@@ -19,8 +19,8 @@ inline constexpr uint32_t DM__MaxCount    = 1 << DM__LengthShift;
 
 struct ArithmeticModel{
 
-	uint32_t* distribution;
-	uint32_t* symbol_count;
+	uint16_t* distribution;
+	uint16_t* symbol_count;
 	uint32_t total_count;
 	uint32_t update_cycle;
 	uint32_t symbols_until_update;
@@ -52,10 +52,13 @@ struct ArithmeticModel{
 		last_symbol = symbols - 1;
 
 		// NOTE: removed decoder table stuff
-		distribution = allocator->alloc<uint32_t>(2 * symbols);
+		// distribution = allocator->alloc<uint32_t>(2 * symbols);
+		distribution = allocator->alloc<uint16_t>(symbols);
+		symbol_count = allocator->alloc<uint16_t>(symbols);
+
 		if(enableTrace) printf("    allocating distribution uint32_t[%u] \n", 2 * symbols);
 		
-		symbol_count = distribution + symbols;
+		// symbol_count = distribution + symbols;
 		total_count = 0;
 		update_cycle = symbols;
 
@@ -82,7 +85,8 @@ struct ArithmeticModel{
 
 			if(enableTrace) printf("    for %i \n", symbols);
 			for (uint32_t n = 0; n < symbols; n++){
-				total_count += (symbol_count[n] = (symbol_count[n] + 1) >> 1);
+				symbol_count[n] = (symbol_count[n] + 1) >> 1;
+				total_count += symbol_count[n];
 			}
 		}
 		
@@ -94,7 +98,7 @@ struct ArithmeticModel{
 		for (k = 0; k < symbols; k++){
 			distribution[k] = (scale * sum) >> (31 - DM__LengthShift);
 
-			if(distribution[k] > 34'000) printf("distribution[k] = %i \n", distribution[k]);
+			// if(distribution[k] > 34'000) printf("distribution[k] = %i \n", distribution[k]);
 
 			sum += symbol_count[k];
 		}
