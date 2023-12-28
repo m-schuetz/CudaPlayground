@@ -75,7 +75,7 @@ void runCudaProgram(){
 	cuCtxGetDevice(&device);
 	cuDeviceGetAttribute(&numSMs, CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, device);
 
-	int workgroupSize = 256;
+	int workgroupSize = 32;
 
 	int numGroups;
 	cuOccupancyMaxActiveBlocksPerMultiprocessor(&numGroups, cuda_program->kernels["kernel"], workgroupSize, 0);

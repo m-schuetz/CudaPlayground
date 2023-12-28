@@ -27,26 +27,26 @@ struct LASpoint10{
 
 struct LASreadItemCompressed_POINT10_v2{
 
-	LASreadItemCompressed_POINT10_v2(ArithmeticDecoder* dec){
-		// uint32_t i;
+	ArithmeticDecoder* dec;
+	uint8_t last_item[20];
+	uint16_t last_intensity[16];
+	StreamingMedian5 last_x_diff_median5[16];
+	StreamingMedian5 last_y_diff_median5[16];
+	int32_t last_height[8];
 
-		// /* set decoder */
-		// this->dec = dec;
+	ArithmeticModel* m_changed_values;
+	IntegerCompressor* ic_intensity;
+	ArithmeticModel* m_scan_angle_rank[2];
+	IntegerCompressor* ic_point_source_ID;
+	ArithmeticModel* m_bit_byte[256];
+	ArithmeticModel* m_classification[256];
+	ArithmeticModel* m_user_data[256];
+	IntegerCompressor* ic_dx;
+	IntegerCompressor* ic_dy;
+	IntegerCompressor* ic_z;
 
-		// /* create models and integer compressors */
-		// m_changed_values = new ArithmeticModel(64, false);
-		// ic_intensity = new IntegerCompressor(dec, 16, 4);
-		// m_scan_angle_rank[0] = new ArithmeticModel(256, false);
-		// m_scan_angle_rank[1] = new ArithmeticModel(256, false);
-		// ic_point_source_ID = new IntegerCompressor(dec, 16);
-		// for (i = 0; i < 256; i++){
-		// 	m_bit_byte[i] = 0;
-		// 	m_classification[i] = 0;
-		// 	m_user_data[i] = 0;
-		// }
-		// ic_dx = new IntegerCompressor(dec, 32, 2);  // 32 bits, 2 context
-		// ic_dy = new IntegerCompressor(dec, 32, 22); // 32 bits, 22 contexts
-		// ic_z = new IntegerCompressor(dec, 32, 20);  // 32 bits, 20 contexts
+	LASreadItemCompressed_POINT10_v2(){
+
 	}
 
 	~LASreadItemCompressed_POINT10_v2(){
@@ -57,8 +57,7 @@ struct LASreadItemCompressed_POINT10_v2{
 		delete m_scan_angle_rank[0];
 		delete m_scan_angle_rank[1];
 		delete ic_point_source_ID;
-		for (i = 0; i < 256; i++)
-		{
+		for (i = 0; i < 256; i++){
 			if (m_bit_byte[i]) delete m_bit_byte[i];
 			if (m_classification[i]) delete m_classification[i];
 			if (m_user_data[i]) delete m_user_data[i];
@@ -81,19 +80,22 @@ struct LASreadItemCompressed_POINT10_v2{
 			this->dec = dec;
 
 			/* create models and integer compressors */
-			m_changed_values = new ArithmeticModel(64, false);
-			ic_intensity = new IntegerCompressor(dec, 16, 4);
-			m_scan_angle_rank[0] = new ArithmeticModel(256, false);
-			m_scan_angle_rank[1] = new ArithmeticModel(256, false);
-			ic_point_source_ID = new IntegerCompressor(dec, 16);
+			ic_intensity         = new IntegerCompressor(dec, 16, 4);
+			ic_point_source_ID   = new IntegerCompressor(dec, 16);
+
+			m_changed_values     = allocator->alloc<ArithmeticModel>(1);
+			m_scan_angle_rank[0] = allocator->alloc<ArithmeticModel>(1);
+			m_scan_angle_rank[1] = allocator->alloc<ArithmeticModel>(1);
+
 			for (i = 0; i < 256; i++){
-				m_bit_byte[i] = 0;
-				m_classification[i] = 0;
-				m_user_data[i] = 0;
+				m_bit_byte[i]       = nullptr;
+				m_classification[i] = nullptr;
+				m_user_data[i]      = nullptr;
 			}
+
 			ic_dx = new IntegerCompressor(dec, 32, 2);  // 32 bits, 2 context
 			ic_dy = new IntegerCompressor(dec, 32, 22); // 32 bits, 22 contexts
-			ic_z = new IntegerCompressor(dec, 32, 20);  // 32 bits, 20 contexts
+			ic_z  = new IntegerCompressor(dec, 32, 20);  // 32 bits, 20 contexts
 		}
 
 
@@ -101,8 +103,7 @@ struct LASreadItemCompressed_POINT10_v2{
 		uint32_t i;
 
 		/* init state */
-		for (i=0; i < 16; i++)
-		{
+		for (i=0; i < 16; i++){
 			last_x_diff_median5[i].init();
 			last_y_diff_median5[i].init();
 			last_intensity[i] = 0;
@@ -110,24 +111,25 @@ struct LASreadItemCompressed_POINT10_v2{
 		}
 
 		/* init models and integer compressors */
-		m_changed_values->init(nullptr, allocator);
+		m_changed_values->init(64, allocator);
 
 		ic_intensity->initDecompressor(allocator);
 
-		m_scan_angle_rank[0]->init(nullptr, allocator);
-		m_scan_angle_rank[1]->init(nullptr, allocator);
+		m_scan_angle_rank[0]->init(256, allocator);
+		m_scan_angle_rank[1]->init(256, allocator);
 		// dec->initSymbolModel(m_scan_angle_rank[0]);
 		// dec->initSymbolModel(m_scan_angle_rank[1]);
 
 		ic_point_source_ID->initDecompressor(allocator);
-		for (i = 0; i < 256; i++) {
-			if (m_bit_byte[i])        m_bit_byte[i]->init(nullptr, allocator);
-			if (m_classification[i])  m_classification[i]->init(nullptr, allocator);
-			if (m_user_data[i])       m_user_data[i]->init(nullptr, allocator);
-			// if (m_bit_byte[i]) dec->initSymbolModel(m_bit_byte[i]);
-			// if (m_classification[i]) dec->initSymbolModel(m_classification[i]);
-			// if (m_user_data[i]) dec->initSymbolModel(m_user_data[i]);
-		}
+
+			// probably never actually happens because these attributes are 
+			// created on-demand during reads?
+		// for (i = 0; i < 256; i++) {
+		// 	if (m_bit_byte[i])        m_bit_byte[i]->init(nullptr, allocator);
+		// 	if (m_classification[i])  m_classification[i]->init(nullptr, allocator);
+		// 	if (m_user_data[i])       m_user_data[i]->init(nullptr, allocator);
+		// }
+
 		ic_dx->initDecompressor(allocator);
 		ic_dy->initDecompressor(allocator);
 		ic_z->initDecompressor(allocator);
@@ -143,6 +145,9 @@ struct LASreadItemCompressed_POINT10_v2{
 	}
 
 	void read(uint8_t* item, uint32_t& context, AllocatorGlobal* allocator){
+
+		uint64_t t_start = nanotime();
+
 		uint32_t r, n, m, l;
 		uint32_t k_bits;
 		int32_t median, diff;
@@ -155,8 +160,8 @@ struct LASreadItemCompressed_POINT10_v2{
 			// decompress the edge_of_flight_line, scan_direction_flag, ... if it has changed
 			if (changed_values & 32) {
 				if (m_bit_byte[last_item[14]] == 0){
-					m_bit_byte[last_item[14]] = new ArithmeticModel(256, false);
-					m_bit_byte[last_item[14]]->init(nullptr, allocator);
+					m_bit_byte[last_item[14]] = new ArithmeticModel(256);
+					m_bit_byte[last_item[14]]->init(256, allocator);
 				}
 
 				last_item[14] = (uint8_t)dec->decodeSymbol(m_bit_byte[last_item[14]]);
@@ -178,8 +183,8 @@ struct LASreadItemCompressed_POINT10_v2{
 			// decompress the classification ... if it has changed
 			if (changed_values & 8){
 				if (m_classification[last_item[15]] == 0){
-					m_classification[last_item[15]] = new ArithmeticModel(256, false);
-					m_classification[last_item[15]]->init(nullptr, allocator);
+					m_classification[last_item[15]] = new ArithmeticModel(256);
+					m_classification[last_item[15]]->init(256, allocator);
 				}
 
 				last_item[15] = (uint8_t)dec->decodeSymbol(m_classification[last_item[15]]);
@@ -195,8 +200,8 @@ struct LASreadItemCompressed_POINT10_v2{
 			if (changed_values & 2)
 			{
 				if (m_user_data[last_item[17]] == 0){
-					m_user_data[last_item[17]] = new ArithmeticModel(256, false);
-					m_user_data[last_item[17]]->init(nullptr, allocator);
+					m_user_data[last_item[17]] = new ArithmeticModel(256);
+					m_user_data[last_item[17]]->init(256, allocator);
 				}
 				last_item[17] = (uint8_t)dec->decodeSymbol(m_user_data[last_item[17]]);
 			}
@@ -213,12 +218,14 @@ struct LASreadItemCompressed_POINT10_v2{
 		}
 
 		// decompress x coordinate
+		if(enableTrace) printf("decompress x coordinate \n");
 		median = last_x_diff_median5[m].get();
 		diff = ic_dx->decompress(median, n==1);
 		((LASpoint10*)last_item)->x += diff;
 		last_x_diff_median5[m].add(diff);
 
 		// decompress y coordinate
+		if(enableTrace) printf("decompress y coordinate \n");
 		median = last_y_diff_median5[m].get();
 		k_bits = ic_dx->getK();
 		diff = ic_dy->decompress(median, (n==1) + ( k_bits < 20 ? U32_ZERO_BIT_0(k_bits) : 20 ));
@@ -226,34 +233,23 @@ struct LASreadItemCompressed_POINT10_v2{
 		last_y_diff_median5[m].add(diff);
 
 		// decompress z coordinate
+		if(enableTrace) printf("decompress z coordinate \n");
 		k_bits = (ic_dx->getK() + ic_dy->getK()) / 2;
 		((LASpoint10*)last_item)->z = ic_z->decompress(last_height[l], (n==1) + (k_bits < 18 ? U32_ZERO_BIT_0(k_bits) : 18));
 		last_height[l] = ((LASpoint10*)last_item)->z;
 
 		// copy the last point
 		memcpy(item, last_item, 20);
+
+		uint64_t t_end = nanotime();
+		if(t_end > t_start){
+			t_readPoint10 += t_end - t_start;
+		}
+
 	}
 
 	//~LASreadItemCompressed_POINT10_v2();
-
-	private:
-	ArithmeticDecoder* dec;
-	uint8_t last_item[20];
-	uint16_t last_intensity[16];
-	StreamingMedian5 last_x_diff_median5[16];
-	StreamingMedian5 last_y_diff_median5[16];
-	int32_t last_height[8];
-
-	ArithmeticModel* m_changed_values;
-	IntegerCompressor* ic_intensity;
-	ArithmeticModel* m_scan_angle_rank[2];
-	IntegerCompressor* ic_point_source_ID;
-	ArithmeticModel* m_bit_byte[256];
-	ArithmeticModel* m_classification[256];
-	ArithmeticModel* m_user_data[256];
-	IntegerCompressor* ic_dx;
-	IntegerCompressor* ic_dy;
-	IntegerCompressor* ic_z;
+	
 };
 
 struct LASreadItemCompressed_RGB12_v2{
@@ -268,17 +264,8 @@ struct LASreadItemCompressed_RGB12_v2{
 	ArithmeticModel* m_rgb_diff_4;
 	ArithmeticModel* m_rgb_diff_5;
 
-	LASreadItemCompressed_RGB12_v2(ArithmeticDecoder* dec){
-		// this->dec = dec;
+	LASreadItemCompressed_RGB12_v2(){
 
-		// /* create models and integer compressors */
-		// m_byte_used  = new ArithmeticModel(128, false);
-		// m_rgb_diff_0 = new ArithmeticModel(256, false);
-		// m_rgb_diff_1 = new ArithmeticModel(256, false);
-		// m_rgb_diff_2 = new ArithmeticModel(256, false);
-		// m_rgb_diff_3 = new ArithmeticModel(256, false);
-		// m_rgb_diff_4 = new ArithmeticModel(256, false);
-		// m_rgb_diff_5 = new ArithmeticModel(256, false);
 	}
 
 	bool init(ArithmeticDecoder* dec, const uint8_t* item, uint32_t& context, AllocatorGlobal* allocator){
@@ -286,34 +273,23 @@ struct LASreadItemCompressed_RGB12_v2{
 		{ // former constructor stuff
 			this->dec = dec;
 
-			/* create models and integer compressors */
-			m_byte_used  = new ArithmeticModel(128, false);
-			m_rgb_diff_0 = new ArithmeticModel(256, false);
-			m_rgb_diff_1 = new ArithmeticModel(256, false);
-			m_rgb_diff_2 = new ArithmeticModel(256, false);
-			m_rgb_diff_3 = new ArithmeticModel(256, false);
-			m_rgb_diff_4 = new ArithmeticModel(256, false);
-			m_rgb_diff_5 = new ArithmeticModel(256, false);
-
-			// m_byte_used  = allocator->alloc<ArithmeticModel>(1);
-			// m_rgb_diff_0 = allocator->alloc<ArithmeticModel>(1);
-			// m_rgb_diff_1 = allocator->alloc<ArithmeticModel>(1);
-			// m_rgb_diff_2 = allocator->alloc<ArithmeticModel>(1);
-			// m_rgb_diff_3 = allocator->alloc<ArithmeticModel>(1);
-			// m_rgb_diff_4 = allocator->alloc<ArithmeticModel>(1);
-			// m_rgb_diff_5 = allocator->alloc<ArithmeticModel>(1);
+			m_byte_used  = allocator->alloc<ArithmeticModel>(1);
+			m_rgb_diff_0 = allocator->alloc<ArithmeticModel>(1);
+			m_rgb_diff_1 = allocator->alloc<ArithmeticModel>(1);
+			m_rgb_diff_2 = allocator->alloc<ArithmeticModel>(1);
+			m_rgb_diff_3 = allocator->alloc<ArithmeticModel>(1);
+			m_rgb_diff_4 = allocator->alloc<ArithmeticModel>(1);
+			m_rgb_diff_5 = allocator->alloc<ArithmeticModel>(1);
 		}
 
-		/* init state */
-
 		/* init models and integer compressors */
-		m_byte_used->init(nullptr, allocator);
-		m_rgb_diff_0->init(nullptr, allocator);
-		m_rgb_diff_1->init(nullptr, allocator);
-		m_rgb_diff_2->init(nullptr, allocator);
-		m_rgb_diff_3->init(nullptr, allocator);
-		m_rgb_diff_4->init(nullptr, allocator);
-		m_rgb_diff_5->init(nullptr, allocator);
+		m_byte_used->init(128, allocator);
+		m_rgb_diff_0->init(256, allocator);
+		m_rgb_diff_1->init(256, allocator);
+		m_rgb_diff_2->init(256, allocator);
+		m_rgb_diff_3->init(256, allocator);
+		m_rgb_diff_4->init(256, allocator);
+		m_rgb_diff_5->init(256, allocator);
 
 		/* init last item */
 		memcpy(last_item, item, 6);
@@ -321,79 +297,73 @@ struct LASreadItemCompressed_RGB12_v2{
 		return true;
 	}
 
-	inline void read(uint8_t* item, uint32_t& context)
-	{
+	inline void read(uint8_t* item, uint32_t& context){
+
+		uint64_t t_start = nanotime();
+
 		uint8_t corr;
 		int32_t diff = 0;
 		uint32_t sym = dec->decodeSymbol(m_byte_used);
-		if (sym & (1 << 0))
-		{
+
+		if (sym & (1 << 0)){
 			corr = dec->decodeSymbol(m_rgb_diff_0);
 			((uint16_t*)item)[0] = (uint16_t)U8_FOLD(corr + (last_item[0]&255));
-		}
-		else 
-		{
+		}else {
 			((uint16_t*)item)[0] = last_item[0]&0xFF;
 		}
-		if (sym & (1 << 1))
-		{
+		
+		if (sym & (1 << 1)){
 			corr = dec->decodeSymbol(m_rgb_diff_1);
 			((uint16_t*)item)[0] |= (((uint16_t)U8_FOLD(corr + (last_item[0]>>8))) << 8);
-		}
-		else
-		{
+		}else{
 			((uint16_t*)item)[0] |= (last_item[0]&0xFF00);
 		}
-		if (sym & (1 << 6))
-		{
+		
+		if (sym & (1 << 6)){
 			diff = (((uint16_t*)item)[0]&0x00FF) - (last_item[0]&0x00FF);
-			if (sym & (1 << 2))
-			{
-			corr = dec->decodeSymbol(m_rgb_diff_2);
-			((uint16_t*)item)[1] = (uint16_t)U8_FOLD(corr + U8_CLAMP(diff+(last_item[1]&255)));
+
+			if (sym & (1 << 2)){
+				corr = dec->decodeSymbol(m_rgb_diff_2);
+				((uint16_t*)item)[1] = (uint16_t)U8_FOLD(corr + U8_CLAMP(diff+(last_item[1]&255)));
+			}else{
+				((uint16_t*)item)[1] = last_item[1]&0xFF;
 			}
-			else
-			{
-			((uint16_t*)item)[1] = last_item[1]&0xFF;
+
+			if (sym & (1 << 4)){
+				corr = dec->decodeSymbol(m_rgb_diff_4);
+				diff = (diff + ((((uint16_t*)item)[1]&0x00FF) - (last_item[1]&0x00FF))) / 2;
+				((uint16_t*)item)[2] = (uint16_t)U8_FOLD(corr + U8_CLAMP(diff+(last_item[2]&255)));
+			}else{
+				((uint16_t*)item)[2] = last_item[2]&0xFF;
 			}
-			if (sym & (1 << 4))
-			{
-			corr = dec->decodeSymbol(m_rgb_diff_4);
-			diff = (diff + ((((uint16_t*)item)[1]&0x00FF) - (last_item[1]&0x00FF))) / 2;
-			((uint16_t*)item)[2] = (uint16_t)U8_FOLD(corr + U8_CLAMP(diff+(last_item[2]&255)));
-			}
-			else
-			{
-			((uint16_t*)item)[2] = last_item[2]&0xFF;
-			}
+
 			diff = (((uint16_t*)item)[0]>>8) - (last_item[0]>>8);
-			if (sym & (1 << 3))
-			{
-			corr = dec->decodeSymbol(m_rgb_diff_3);
-			((uint16_t*)item)[1] |= (((uint16_t)U8_FOLD(corr + U8_CLAMP(diff+(last_item[1]>>8))))<<8);
+			
+			if (sym & (1 << 3)){
+				corr = dec->decodeSymbol(m_rgb_diff_3);
+				((uint16_t*)item)[1] |= (((uint16_t)U8_FOLD(corr + U8_CLAMP(diff+(last_item[1]>>8))))<<8);
+			}else{
+				((uint16_t*)item)[1] |= (last_item[1]&0xFF00);
 			}
-			else
-			{
-			((uint16_t*)item)[1] |= (last_item[1]&0xFF00);
+
+			if (sym & (1 << 5)){
+				corr = dec->decodeSymbol(m_rgb_diff_5);
+				diff = (diff + ((((uint16_t*)item)[1]>>8) - (last_item[1]>>8))) / 2;
+				((uint16_t*)item)[2] |= (((uint16_t)U8_FOLD(corr + U8_CLAMP(diff+(last_item[2]>>8))))<<8);
+			}else{
+				((uint16_t*)item)[2] |= (last_item[2]&0xFF00);
 			}
-			if (sym & (1 << 5))
-			{
-			corr = dec->decodeSymbol(m_rgb_diff_5);
-			diff = (diff + ((((uint16_t*)item)[1]>>8) - (last_item[1]>>8))) / 2;
-			((uint16_t*)item)[2] |= (((uint16_t)U8_FOLD(corr + U8_CLAMP(diff+(last_item[2]>>8))))<<8);
-			}
-			else
-			{
-			((uint16_t*)item)[2] |= (last_item[2]&0xFF00);
-			}
-		}
-		else
-		{
+		}else{
 			((uint16_t*)item)[1] = ((uint16_t*)item)[0];
 			((uint16_t*)item)[2] = ((uint16_t*)item)[0];
 		}
 
 		memcpy(last_item, item, 6);
+
+		uint64_t t_end = nanotime();
+		if(t_end > t_start){
+			t_readRgb12 += t_end - t_start;
+		}
 	}
 
 };

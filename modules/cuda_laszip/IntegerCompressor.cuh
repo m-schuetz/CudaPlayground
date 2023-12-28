@@ -80,13 +80,14 @@ struct IntegerCompressor{
 		uint32_t i;
 
 		// maybe create the models
-		if (mBits == 0){
+		if (mBits == nullptr){
 
 			mBits = allocator->alloc<ArithmeticModel*>(contexts);
 
 			for (i = 0; i < contexts; i++){
 				ArithmeticModel* model = allocator->alloc<ArithmeticModel>(1);
-				*model = ArithmeticModel(corr_bits + 1, false);
+				// *model = ArithmeticModel(corr_bits + 1);
+				model->init(corr_bits + 1, allocator);
 				mBits[i] = model;
 			}
 
@@ -95,32 +96,28 @@ struct IntegerCompressor{
 			{
 				ArithmeticBitModel* model = allocator->alloc<ArithmeticBitModel>(1);
 				*model = ArithmeticBitModel();
+				model->init();
 				mCorrector[0] = (ArithmeticModel*)model;
 			}
 
 			for (i = 1; i <= corr_bits; i++){
+				
+				uint32_t symbols = 0;
+				if (i <= bits_high) {
+					symbols = 1 << i;
+				} else {
+					symbols = 1 << bits_high;
+				}
 
 				ArithmeticModel* model = allocator->alloc<ArithmeticModel>(1);
-				
-				if (i <= bits_high) {
-					*model = ArithmeticModel(1 << i, false);
-				} else {
-					*model = ArithmeticModel(1 << bits_high, false);
-				}
+				model->init(symbols, allocator);
 
 				mCorrector[i] = model;
 			}
+		}else{
+			printf("WARN: didnt create, but should have init'ed?");
 		}
 
-		// certainly init the models
-		for (i = 0; i < contexts; i++){
-			mBits[i]->init(nullptr, allocator);
-		}
-
-		((ArithmeticBitModel*)mCorrector[0])->init();
-		for (i = 1; i <= corr_bits; i++){
-			mCorrector[i]->init(nullptr, allocator);
-		}
 	}
 
 
@@ -139,6 +136,8 @@ struct IntegerCompressor{
 	int32_t readCorrector(ArithmeticModel* mBits){
 		int32_t c;
 
+		uint64_t t_start = nanotime();
+
 		// decode within which interval the corrector is falling
 		k = dec->decodeSymbol(mBits);
 
@@ -147,6 +146,7 @@ struct IntegerCompressor{
 		// then c is either smaller than 0 or bigger than 1
 		if (k){
 			if (k < 32){
+
 				// for small k we can do this in one step
 				if (k <= bits_high){
 					// decompress c with the range coder
@@ -154,13 +154,16 @@ struct IntegerCompressor{
 				}else{
 					// for larger k we need to do this in two steps
 					int k1 = k-bits_high;
+
 					// decompress higher bits with table
 					c = dec->decodeSymbol(mCorrector[k]);
+
 					// read lower bits raw
 					int c1 = dec->readBits(k1);
 					// put the corrector back together
 					c = (c << k1) | c1;
 				}
+
 				// translate c back into its correct interval
 				if (c >= (1<<(k-1))) {
 					// if c is in the interval [ 2^(k-1)  ...  + 2^k - 1 ]
@@ -177,6 +180,11 @@ struct IntegerCompressor{
 		} else {
 			// then c is either 0 or 1
 			c = dec->decodeBit((ArithmeticBitModel*)mCorrector[0]);
+		}
+
+		uint64_t t_end = nanotime();
+		if(t_end > t_start){
+			t_readCorrector += t_end - t_start;
 		}
 
 		return c;

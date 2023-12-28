@@ -230,10 +230,10 @@ void kernel(
 
 	if(grid.thread_rank() == 0){
 
-		uint64_t t_start = nanotime();
+		
 
-		int chunkIndex = 0;
-		Chunk chunk = chunks[chunkIndex];
+		// int chunkIndex = 0;
+		// Chunk chunk = chunks[chunkIndex];
 		
 		uint64_t start_offset = g_allocator->offset;
 
@@ -249,8 +249,14 @@ void kernel(
 
 		// Now start decompressing further points
 		auto dec = new ArithmeticDecoder(chunkBuffer, lasheader->recordLength);
-		auto readerPoint10 = g_allocator->alloc<LASreadItemCompressed_POINT10_v2>(1);
-		auto readerRgb12   = g_allocator->alloc<LASreadItemCompressed_RGB12_v2>(1);
+		// auto readerPoint10 = g_allocator->alloc<LASreadItemCompressed_POINT10_v2>(1);
+		// auto readerRgb12   = g_allocator->alloc<LASreadItemCompressed_RGB12_v2>(1);
+
+		__shared__ LASreadItemCompressed_POINT10_v2 readerPoint10;
+		__shared__ LASreadItemCompressed_RGB12_v2 readerRgb12;
+
+		// printf("sizeof(LASreadItemCompressed_POINT10_v2): %llu \n", sizeof(LASreadItemCompressed_POINT10_v2)); 
+		// printf("sizeof(LASreadItemCompressed_RGB12_v2): %llu \n", sizeof(LASreadItemCompressed_RGB12_v2)); 
 
 		// printf("%i, %i, %i    -    %i, %i, %i \n", X, Y, Z, R, G, B);
 
@@ -264,36 +270,69 @@ void kernel(
 		memcpy(itemRgb12 + 0, &R, 2);
 		memcpy(itemRgb12 + 2, &G, 2);
 		memcpy(itemRgb12 + 4, &B, 2);
+
+		// enableTrace = true;
 		
-		readerPoint10->init(dec, itemPoint10, context, g_allocator);
-		readerRgb12->init(dec, itemRgb12, context, g_allocator);
+		readerPoint10.init(dec, itemPoint10, context, g_allocator);
+		readerRgb12.init(dec, itemRgb12, context, g_allocator);
 
-		for (int i = 1; i < 50'000; i++) {
+		enableTrace = false;
+
+		// enableTrace = true;
+
+		// for (int i = 1; i < 2; i++) 
+		uint64_t t_start = nanotime();
+		for (int i = 1; i < 50'000; i++) 
+		{
+			dbg_pointIndex = i;
+			// enableTrace = (i >= 20'000 && i < 20'001);
+
+			if(enableTrace) printf("========================== \n");
+			if(enableTrace) printf("== DECODING POINT %i \n", dbg_pointIndex);
+			if(enableTrace) printf("========================= \n");
+
 			
-			readerPoint10->read(itemPoint10, context, g_allocator);
-			readerRgb12->read(itemRgb12, context);
+			readerPoint10.read(itemPoint10, context, g_allocator);
+			readerRgb12.read(itemRgb12, context);
 
-			int32_t X = readAs<int32_t>(itemPoint10, 0);
-			int32_t Y = readAs<int32_t>(itemPoint10, 4);
-			int32_t Z = readAs<int32_t>(itemPoint10, 8);
+			if(i < 5 || i == 49'999){
+				int32_t X = readAs<int32_t>(itemPoint10, 0);
+				int32_t Y = readAs<int32_t>(itemPoint10, 4);
+				int32_t Z = readAs<int32_t>(itemPoint10, 8);
 
-			uint16_t R = readAs<uint16_t>(itemRgb12, 0);
-			uint16_t G = readAs<uint16_t>(itemRgb12, 2);
-			uint16_t B = readAs<uint16_t>(itemRgb12, 4);
+				uint16_t R = readAs<uint16_t>(itemRgb12, 0);
+				uint16_t G = readAs<uint16_t>(itemRgb12, 2);
+				uint16_t B = readAs<uint16_t>(itemRgb12, 4);
 
-			if(i < 5 || i == 49'999)
 				printf("%i, %i, %i    -    %i, %i, %i \n", X, Y, Z, R, G, B);
+			}
+
 		}
 
 		uint64_t t_end = nanotime();
 		uint64_t nanos = t_end - t_start;
-		float millies = double(nanos) / 1'000'000.0;
+		// float millies = double(nanos) / 1'000'000.0;
+		printf("======================================================= \n");
+		printf("decoding time:   %5.1f ms \n", float(double(nanos) / 1'000'000.0));
+		printf("======================================================= \n");
+
+		printf("t_readPoint10:   %5.1f ms \n", float(double(t_readPoint10) / 1'000'000.0));
+		printf("t_readRgb12:     %5.1f ms \n", float(double(t_readRgb12) / 1'000'000.0));
+		printf("sum:             %5.1f ms \n", float(double(t_readPoint10 + t_readRgb12) / 1'000'000.0));
+		printf("update:          %5.1f ms \n", float(double(t_update) / 1'000'000.0));
+		printf("decodeSymbol:    %5.1f ms \n", float(double(t_decodeSymbol) / 1'000'000.0));
+		printf("decodeSymbols_0: %5.1f ms \n", float(double(t_decodeSymbols_0) / 1'000'000.0));
+		printf("decodeSymbols_1: %5.1f ms \n", float(double(t_decodeSymbols_1) / 1'000'000.0));
+		printf("renorm:          %5.1f ms \n", float(double(t_renorm) / 1'000'000.0));
+		printf("readCorrector:   %5.1f ms \n", float(double(t_readCorrector) / 1'000'000.0));
+		printf("streamingMedian: %5.1f ms \n", float(double(t_streamingMedian) / 1'000'000.0));
+		printf("======================================================= \n");
 
 		// printf("duration: %.3f ms \n", millies);
 
 		uint64_t end_offset = g_allocator->offset;
 		uint64_t allocatedBytes = end_offset - start_offset;
-		printf("allocatedBytes: %i kb \n", allocatedBytes / 1000);
+		printf("allocatedBytes: %llu kb \n", allocatedBytes / 1000);
 
 	
 

@@ -21,68 +21,46 @@ struct ArithmeticModel{
 
 	uint32_t* distribution;
 	uint32_t* symbol_count;
-	uint32_t* decoder_table;
 	uint32_t total_count;
 	uint32_t update_cycle;
 	uint32_t symbols_until_update;
 	uint32_t symbols;
 	uint32_t last_symbol;
-	uint32_t table_size;
-	uint32_t table_shift;
-	bool compress;
 
-	ArithmeticModel(uint32_t symbols, bool compress){
-		this->symbols = symbols;
-		this->compress = compress;
-		distribution = nullptr;
+	ArithmeticModel(uint32_t symbols){
+		// this->symbols = symbols;
+		// distribution = nullptr;
 	}
 
 	~ArithmeticModel(){
 		if (distribution) delete [] distribution;
 	}
 
-	int32_t init(uint32_t* table, AllocatorGlobal* allocator){
+	int32_t init(uint32_t symbols, AllocatorGlobal* allocator){
 
-		if (distribution == 0){
+		 // former constructor stuff
+		this->symbols = symbols;
+		distribution = nullptr;
+		
 
-			if ( (symbols < 2) || (symbols > (1 << 11))){
-				return -1; // invalid number of symbols
-			}
-
-			last_symbol = symbols - 1;
-
-			if ((!compress) && (symbols > 16)){
-				uint32_t table_bits = 3;
-
-				while (symbols > (1U << (table_bits + 2))){
-					 ++table_bits;
-				}
-
-				table_size  = 1 << table_bits;
-				table_shift = DM__LengthShift - table_bits;
-
-				distribution = allocator->alloc<uint32_t>(2 * symbols + table_size + 2);
-				decoder_table = distribution + 2 * symbols;
-			}else {
-				// small alphabet: no table needed
-				decoder_table = 0;
-				table_size = table_shift = 0;
-				distribution = allocator->alloc<uint32_t>(2 * symbols);
-			}
-			
-			if (distribution == 0){
-				return -1; // "cannot allocate model memory");
-			}
-			symbol_count = distribution + symbols;
+		
+		if ( (symbols < 2) || (symbols > (1 << 11))){
+			printf("ERROR: invalid number of symbols \n");
+			return -1; // invalid number of symbols
 		}
 
+		last_symbol = symbols - 1;
+
+		// NOTE: removed decoder table stuff
+		distribution = allocator->alloc<uint32_t>(2 * symbols);
+		if(enableTrace) printf("    allocating distribution uint32_t[%u] \n", 2 * symbols);
+		
+		symbol_count = distribution + symbols;
 		total_count = 0;
 		update_cycle = symbols;
 
-		if (table){
-			for (uint32_t k = 0; k < symbols; k++) symbol_count[k] = table[k];
-		}else{
-			for (uint32_t k = 0; k < symbols; k++) symbol_count[k] = 1;
+		for (uint32_t k = 0; k < symbols; k++){
+			symbol_count[k] = 1;
 		}
 
 		update();
@@ -93,39 +71,46 @@ struct ArithmeticModel{
 	}
 
 	void update(){
+
+		uint64_t t_start = nanotime();
+
+		if(enableTrace) printf("##################################  update model. point %i \n", dbg_pointIndex);
+
 		// halve counts when a threshold is reached
 		if ((total_count += update_cycle) > DM__MaxCount){
 			total_count = 0;
+
+			if(enableTrace) printf("    for %i \n", symbols);
 			for (uint32_t n = 0; n < symbols; n++){
 				total_count += (symbol_count[n] = (symbol_count[n] + 1) >> 1);
 			}
 		}
 		
-		// compute cumulative distribution, decoder table
-		uint32_t k, sum = 0, s = 0;
+		// compute cumulative distribution
+		uint32_t k, sum = 0;
 		uint32_t scale = 0x80000000U / total_count;
 
-		if (compress || (table_size == 0)){
-			for (k = 0; k < symbols; k++){
-				distribution[k] = (scale * sum) >> (31 - DM__LengthShift);
-				sum += symbol_count[k];
-			}
-		}else{
-			for (k = 0; k < symbols; k++){
-				distribution[k] = (scale * sum) >> (31 - DM__LengthShift);
-				sum += symbol_count[k];
-				uint32_t w = distribution[k] >> table_shift;
-				while (s < w) decoder_table[++s] = k - 1;
-			}
-			decoder_table[0] = 0;
-			while (s <= table_size) decoder_table[++s] = symbols - 1;
+		if(enableTrace) printf("    for %i \n", symbols);
+		for (k = 0; k < symbols; k++){
+			distribution[k] = (scale * sum) >> (31 - DM__LengthShift);
+
+			if(distribution[k] > 34'000) printf("distribution[k] = %i \n", distribution[k]);
+
+			sum += symbol_count[k];
 		}
-		
+
 		// set frequency of model updates
 		update_cycle = (5 * update_cycle) >> 2;
 		uint32_t max_cycle = (symbols + 6) << 3;
-		if (update_cycle > max_cycle) update_cycle = max_cycle;
+		if (update_cycle > max_cycle){ 
+			update_cycle = max_cycle;
+		}
 		symbols_until_update = update_cycle;
+
+		uint64_t t_end = nanotime();
+		if(t_end > t_start){
+			t_update += t_end - t_start;
+		}
 	}
 
 };

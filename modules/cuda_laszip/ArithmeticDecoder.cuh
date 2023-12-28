@@ -37,6 +37,8 @@ struct ArithmeticDecoder{
 	}
 	uint32_t decodeBit(ArithmeticBitModel* m){
 
+		if(enableTrace) printf("decodeBit() \n");
+
 		// product l x p0
 		uint32_t x = m->bit_0_prob * (length >> BM__LengthShift);
 
@@ -57,52 +59,38 @@ struct ArithmeticDecoder{
 		if (length < AC__MinLength) renorm_dec_interval();
 
 		// periodic model update
-		if (--m->bits_until_update == 0) m->update();
+		m->bits_until_update--;
+		if (m->bits_until_update == 0){
+			m->update();
+		}
 
 		// return data bit value
 		return sym;
 	}
 
-	uint32_t decodeSymbol(ArithmeticModel* m)
-	{
+	uint32_t decodeSymbol(ArithmeticModel* m){
+
+		uint64_t t_start = nanotime();
+
+		if(enableTrace) printf("decodeSymbol \n");
+
 		uint32_t n, sym, x, y = length;
 
-		// use table look-up for faster decoding
-		if (m->decoder_table) {
+		// NOTE: removed decoder table path
+		{// decode using only multiplications
+			uint64_t t_start_decodeSymbols_1 = nanotime();
 
-			unsigned dv = value / (length >>= DM__LengthShift);
-			unsigned t = dv >> m->table_shift;
-
-			// initial decision based on table look-up
-			sym = m->decoder_table[t];
-			n = m->decoder_table[t+1] + 1;
-
-			// finish with bisection search
-			while (n > sym + 1) {
-				uint32_t k = (sym + n) >> 1;
-				if (m->distribution[k] > dv){
-					 n = k;
-				} else {
-					sym = k;
-				}
-			}
-
-			// compute products
-			x = m->distribution[sym] * length;
-			
-			if (sym != m->last_symbol){ 
-				y = m->distribution[sym+1] * length;
-			}
-		} else {
-			// decode using only multiplications
+			// if(enableTrace) printf("    decode using only multiplications \n");
 
 			x = sym = 0;
 			length >>= DM__LengthShift;
 			uint32_t k = (n = m->symbols) >> 1;
 			
 			// decode via bisection search
+			int counter = 0;
 			do {
 				uint32_t z = length * m->distribution[k];
+
 				if (z > value) {
 					// value is smaller
 					n = k;
@@ -112,7 +100,16 @@ struct ArithmeticDecoder{
 					sym = k;
 					x = z;
 				}
+				counter++;
 			} while ((k = (sym + n) >> 1) != sym);
+
+			// if(counter > 10) printf("            counter_2 is large: %i \n", counter);
+			// if(enableTrace) printf("    counter_2: %i \n", counter);
+
+			uint64_t t_end_decodeSymbols_1 = nanotime();
+			if(t_end_decodeSymbols_1 > t_start_decodeSymbols_1){
+				t_decodeSymbols_1 += (t_end_decodeSymbols_1 - t_start_decodeSymbols_1);
+			}
 		}
 
 		// update interval
@@ -120,17 +117,21 @@ struct ArithmeticDecoder{
 		length = y - x;
 
 		// renormalization
-		if (length < AC__MinLength) renorm_dec_interval();
+		if (length < AC__MinLength){ 
+			renorm_dec_interval();
+		}
 
-		++m->symbol_count[sym];
+		m->symbol_count[sym]++;
+		m->symbols_until_update--;
 
 		// periodic model update
-		if (--m->symbols_until_update == 0) m->update();
+		if (m->symbols_until_update == 0){
+			m->update();
+		}
 
-		//assert(sym < m->symbols);
-		if (!(sym < m->symbols)) {
-			// TODO handle potential errors
-			// exit(123);
+		uint64_t t_end = nanotime();
+		if(t_end > t_start){
+			t_decodeSymbol += (t_end - t_start);
 		}
 
 		return sym;
@@ -151,14 +152,16 @@ struct ArithmeticDecoder{
 	}
 
 	uint32_t readBits(uint32_t bits){
+
+		if(enableTrace) printf("readBits(%i) \n", bits);
+
 		//assert(bits && (bits <= 32));
 		if (!(bits && (bits <= 32))) {
 			// TODO: handle potential error
 			// exit(123);
 		}
 
-		if (bits > 19)
-		{
+		if (bits > 19){
 			uint32_t tmp = readShort();
 			bits = bits - 16;
 			uint32_t tmp1 = readBits(bits) << 16;
@@ -168,7 +171,10 @@ struct ArithmeticDecoder{
 		uint32_t sym = value / (length >>= bits);// decode symbol, change length
 		value -= length * sym;                                    // update interval
 
-		if (length < AC__MinLength) renorm_dec_interval();        // renormalization
+		if (length < AC__MinLength){
+			// renormalization
+			renorm_dec_interval();
+		}
 
 		if (sym >= (1u<<bits)){
 			// TODO: handle potential error
@@ -209,10 +215,46 @@ struct ArithmeticDecoder{
 	}
 
 	inline void renorm_dec_interval(){
+
+		uint64_t t_start = nanotime();
+
+		// if(enableTrace) printf("renorm_dec_interval \n");
+
+
+
 		// read least-significant byte
+		int counter = 0;
 		do {
 			value = (value << 8) | getByte();
-		} while ((length <<= 8) < AC__MinLength);        // length multiplied by 256
+			counter++;
+			
+			// length multiplied by 256
+			length = length << 8;
+		} while (length < AC__MinLength);
+
+		// alternative without loop. Not faster, though
+		// value = (value << 8) | getByte();
+		// length = length << 8;
+		// if(length < AC__MinLength){
+		// 	value = (value << 8) | getByte();
+		// 	length = length << 8;
+		// }
+		// if(length < AC__MinLength){
+		// 	value = (value << 8) | getByte();
+		// 	length = length << 8;
+		// }
+
+
+		
+		// if(enableTrace) printf("    counter: %i \n", counter);
+		// if(counter > 1) printf("    !!!!!!! large counter: %i \n", counter);
+		
+		// if(enableTrace) printf("    counter: %i \n", counter);
+
+		uint64_t t_end = nanotime();
+		if(t_end > t_start){
+			t_renorm += t_end - t_start;
+		}
 	}
 
 	uint32_t getByte(){

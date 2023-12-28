@@ -14,6 +14,8 @@ struct StreamingMedian5{
 	}
 
 	inline void add(int32_t v){
+		uint64_t t_start = nanotime();
+
 		if (high){
 			if (v < values[2]){
 				values[4] = values[3];
@@ -61,6 +63,11 @@ struct StreamingMedian5{
 				}
 				high = true;
 			}
+		}
+
+		uint64_t t_end = nanotime();
+		if(t_end > t_start){
+			t_streamingMedian += t_end - t_start;
 		}
 	}
 
