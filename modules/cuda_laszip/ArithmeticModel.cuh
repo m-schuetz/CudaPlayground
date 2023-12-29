@@ -27,7 +27,7 @@ struct ArithmeticModel{
 	uint32_t symbols;
 	uint32_t last_symbol;
 
-	ArithmeticModel(uint32_t symbols){
+	ArithmeticModel(){
 		// this->symbols = symbols;
 		// distribution = nullptr;
 	}

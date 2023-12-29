@@ -4,6 +4,49 @@
 
 #pragma once
 
+struct laszip_point{
+	int32_t X;
+	int32_t Y;
+	int32_t Z;
+	uint16_t intensity;
+	uint8_t return_number : 3;
+	uint8_t number_of_returns : 3;
+	uint8_t scan_direction_flag : 1;
+	uint8_t edge_of_flight_line : 1;
+	uint8_t classification : 5;
+	uint8_t synthetic_flag : 1;
+	uint8_t keypoint_flag  : 1;
+	uint8_t withheld_flag  : 1;
+	int8_t scan_angle_rank;
+	uint8_t user_data;
+	uint16_t point_source_ID;
+
+	// LAS 1.4 only
+	int16_t extended_scan_angle;
+	uint8_t extended_point_type : 2;
+	uint8_t extended_scanner_channel : 2;
+	uint8_t extended_classification_flags : 4;
+	uint8_t extended_classification;
+	uint8_t extended_return_number : 4;
+	uint8_t extended_number_of_returns : 4;
+
+	// for 8 byte alignment of the GPS time
+	uint8_t dummy[7];
+
+	double gps_time;
+	uint16_t rgb[4];
+	uint8_t wave_packet[29];
+
+	int32_t num_extra_bytes;
+	uint8_t* extra_bytes;
+
+};
+
+
+typedef union U32I32F32 { uint32_t u32; int32_t i32; float f32; } U32I32F32;
+typedef union U64I64F64 { uint64_t u64; int64_t i64; double f64; } U64I64F64;
+typedef union I64U32I32F32 { int64_t i64; uint32_t u32[2]; int32_t i32[2]; float f32[2]; } I64U32I32F32;
+
 #define F32_MAX            +2.0e+37f
 #define F32_MIN            -2.0e+37f
 

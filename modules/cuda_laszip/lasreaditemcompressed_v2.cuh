@@ -80,8 +80,8 @@ struct LASreadItemCompressed_POINT10_v2{
 			this->dec = dec;
 
 			/* create models and integer compressors */
-			ic_intensity         = new IntegerCompressor(dec, 16, 4);
-			ic_point_source_ID   = new IntegerCompressor(dec, 16);
+			ic_intensity         = allocator->alloc<IntegerCompressor>(1);
+			ic_point_source_ID   = allocator->alloc<IntegerCompressor>(1);
 
 			m_changed_values     = allocator->alloc<ArithmeticModel>(1);
 			m_scan_angle_rank[0] = allocator->alloc<ArithmeticModel>(1);
@@ -93,9 +93,9 @@ struct LASreadItemCompressed_POINT10_v2{
 				m_user_data[i]      = nullptr;
 			}
 
-			ic_dx = new IntegerCompressor(dec, 32, 2);  // 32 bits, 2 context
-			ic_dy = new IntegerCompressor(dec, 32, 22); // 32 bits, 22 contexts
-			ic_z  = new IntegerCompressor(dec, 32, 20);  // 32 bits, 20 contexts
+			ic_dx = allocator->alloc<IntegerCompressor>(1); // 32 bits, 2 context
+			ic_dy = allocator->alloc<IntegerCompressor>(1); // 32 bits, 22 contexts
+			ic_z  = allocator->alloc<IntegerCompressor>(1); // 32 bits, 20 contexts
 		}
 
 
@@ -113,14 +113,16 @@ struct LASreadItemCompressed_POINT10_v2{
 		/* init models and integer compressors */
 		m_changed_values->init(64, allocator);
 
+		ic_intensity->init(dec, 16, 4);
+		ic_point_source_ID->init(dec, 16);
 		ic_intensity->initDecompressor(allocator);
+		ic_point_source_ID->initDecompressor(allocator);
 
 		m_scan_angle_rank[0]->init(256, allocator);
 		m_scan_angle_rank[1]->init(256, allocator);
 		// dec->initSymbolModel(m_scan_angle_rank[0]);
 		// dec->initSymbolModel(m_scan_angle_rank[1]);
 
-		ic_point_source_ID->initDecompressor(allocator);
 
 			// probably never actually happens because these attributes are 
 			// created on-demand during reads?
@@ -130,6 +132,9 @@ struct LASreadItemCompressed_POINT10_v2{
 		// 	if (m_user_data[i])       m_user_data[i]->init(nullptr, allocator);
 		// }
 
+		ic_dx->init(dec, 32, 2);
+		ic_dy->init(dec, 32, 22);
+		ic_z->init(dec, 32, 20);
 		ic_dx->initDecompressor(allocator);
 		ic_dy->initDecompressor(allocator);
 		ic_z->initDecompressor(allocator);
@@ -155,12 +160,14 @@ struct LASreadItemCompressed_POINT10_v2{
 		// decompress which other values have changed
 		int32_t changed_values = dec->decodeSymbol(m_changed_values);
 
+		if(enableTrace) printf("changed_values: %i \n", changed_values);
+
 		if (changed_values) {
 
 			// decompress the edge_of_flight_line, scan_direction_flag, ... if it has changed
 			if (changed_values & 32) {
 				if (m_bit_byte[last_item[14]] == 0){
-					m_bit_byte[last_item[14]] = new ArithmeticModel(256);
+					m_bit_byte[last_item[14]] = allocator->alloc<ArithmeticModel>(1);
 					m_bit_byte[last_item[14]]->init(256, allocator);
 				}
 
@@ -172,6 +179,8 @@ struct LASreadItemCompressed_POINT10_v2{
 			m = number_return_map[n][r];
 			l = number_return_level[n][r];
 
+			if(enableTrace) printf("rnml: %u, %u, %u, %u \n", r, n, m, l);
+
 			// decompress the intensity if it has changed
 			if (changed_values & 16){
 				((LASpoint10*)last_item)->intensity = (uint16_t)ic_intensity->decompress(last_intensity[m], (m < 3 ? m : 3));
@@ -180,15 +189,19 @@ struct LASreadItemCompressed_POINT10_v2{
 				((LASpoint10*)last_item)->intensity = last_intensity[m];
 			}
 
+			if(enableTrace) printf("intensity: %i \n", ((LASpoint10*)last_item)->intensity);
+
 			// decompress the classification ... if it has changed
 			if (changed_values & 8){
 				if (m_classification[last_item[15]] == 0){
-					m_classification[last_item[15]] = new ArithmeticModel(256);
+					m_classification[last_item[15]] = allocator->alloc<ArithmeticModel>(1);
 					m_classification[last_item[15]]->init(256, allocator);
 				}
 
 				last_item[15] = (uint8_t)dec->decodeSymbol(m_classification[last_item[15]]);
 			}
+
+			if(enableTrace) printf("classification: %i \n", last_item[15]);
 			
 			// decompress the scan_angle_rank ... if it has changed
 			if (changed_values & 4){
@@ -200,7 +213,7 @@ struct LASreadItemCompressed_POINT10_v2{
 			if (changed_values & 2)
 			{
 				if (m_user_data[last_item[17]] == 0){
-					m_user_data[last_item[17]] = new ArithmeticModel(256);
+					m_user_data[last_item[17]] = allocator->alloc<ArithmeticModel>(1);
 					m_user_data[last_item[17]]->init(256, allocator);
 				}
 				last_item[17] = (uint8_t)dec->decodeSymbol(m_user_data[last_item[17]]);
@@ -250,6 +263,158 @@ struct LASreadItemCompressed_POINT10_v2{
 
 	//~LASreadItemCompressed_POINT10_v2();
 	
+};
+
+#define LASZIP_GPSTIME_MULTI 500
+#define LASZIP_GPSTIME_MULTI_MINUS -10
+#define LASZIP_GPSTIME_MULTI_UNCHANGED (LASZIP_GPSTIME_MULTI - LASZIP_GPSTIME_MULTI_MINUS + 1)
+#define LASZIP_GPSTIME_MULTI_CODE_FULL (LASZIP_GPSTIME_MULTI - LASZIP_GPSTIME_MULTI_MINUS + 2)
+#define LASZIP_GPSTIME_MULTI_TOTAL (LASZIP_GPSTIME_MULTI - LASZIP_GPSTIME_MULTI_MINUS + 6) 
+
+struct LASreadItemCompressed_GPSTIME11_v2{
+
+	ArithmeticDecoder* dec;
+	uint32_t last, next;
+	U64I64F64 last_gpstime[4];
+	int32_t last_gpstime_diff[4];
+	int32_t multi_extreme_counter[4];
+
+	ArithmeticModel* m_gpstime_multi;
+	ArithmeticModel* m_gpstime_0diff;
+	IntegerCompressor* ic_gpstime;
+
+	LASreadItemCompressed_GPSTIME11_v2(){
+
+	}
+
+	bool init(ArithmeticDecoder* dec, const uint8_t* item, uint32_t& context, AllocatorGlobal* allocator){
+		this->dec = dec;
+
+		/* create entropy models and integer compressors */
+		m_gpstime_multi = allocator->alloc<ArithmeticModel>(1);
+		m_gpstime_0diff = allocator->alloc<ArithmeticModel>(1);
+		m_gpstime_multi->init(LASZIP_GPSTIME_MULTI_TOTAL, allocator);
+		m_gpstime_0diff->init(6, allocator);
+
+		ic_gpstime = allocator->alloc<IntegerCompressor>(1);
+		ic_gpstime->init(dec, 32, 9);
+		ic_gpstime->initDecompressor(allocator);
+
+		last = 0, next = 0;
+		last_gpstime_diff[0] = 0;
+		last_gpstime_diff[1] = 0;
+		last_gpstime_diff[2] = 0;
+		last_gpstime_diff[3] = 0;
+		multi_extreme_counter[0] = 0;
+		multi_extreme_counter[1] = 0;
+		multi_extreme_counter[2] = 0;
+		multi_extreme_counter[3] = 0;
+
+		/* init last item */
+		last_gpstime[0].u64 = *((uint64_t*)item);
+		last_gpstime[1].u64 = 0;
+		last_gpstime[2].u64 = 0;
+		last_gpstime[3].u64 = 0;
+
+		return true;
+	}
+
+	inline void read(uint8_t* item, uint32_t& context){
+
+		uint64_t t_start = nanotime();
+
+		int32_t multi;
+		if (last_gpstime_diff[last] == 0) {
+			// if the last integer difference was zero
+			multi = dec->decodeSymbol(m_gpstime_0diff);
+
+			if (multi == 1) {
+				// the difference can be represented with 32 bits
+				last_gpstime_diff[last] = ic_gpstime->decompress(0, 0);
+				last_gpstime[last].i64 += last_gpstime_diff[last];
+				multi_extreme_counter[last] = 0; 
+			}else if (multi == 2) {
+				// the difference is huge
+				next = (next+1)&3;
+				last_gpstime[next].u64 = ic_gpstime->decompress((int32_t)(last_gpstime[last].u64 >> 32), 8);
+				last_gpstime[next].u64 = last_gpstime[next].u64 << 32;
+				last_gpstime[next].u64 |= dec->readInt();
+				last = next;
+				last_gpstime_diff[last] = 0;
+				multi_extreme_counter[last] = 0; 
+			}else if (multi > 2) {
+				// we switch to another sequence
+				last = (last+multi-2)&3;
+				read(item, context);
+			}
+		}else{
+			multi = dec->decodeSymbol(m_gpstime_multi);
+			
+			if (multi == 1){
+				last_gpstime[last].i64 += ic_gpstime->decompress(last_gpstime_diff[last], 1);;
+				multi_extreme_counter[last] = 0;
+			}else if (multi < LASZIP_GPSTIME_MULTI_UNCHANGED){
+				int32_t gpstime_diff;
+				
+				if (multi == 0){
+					gpstime_diff = ic_gpstime->decompress(0, 7);
+					multi_extreme_counter[last]++;
+
+					if (multi_extreme_counter[last] > 3){
+						last_gpstime_diff[last] = gpstime_diff;
+						multi_extreme_counter[last] = 0;
+					}
+				}else if (multi < LASZIP_GPSTIME_MULTI){
+					if (multi < 10)
+						gpstime_diff = ic_gpstime->decompress(multi*last_gpstime_diff[last], 2);
+					else
+						gpstime_diff = ic_gpstime->decompress(multi*last_gpstime_diff[last], 3);
+				}else if (multi == LASZIP_GPSTIME_MULTI){
+					gpstime_diff = ic_gpstime->decompress(LASZIP_GPSTIME_MULTI*last_gpstime_diff[last], 4);
+					multi_extreme_counter[last]++;
+					
+					if (multi_extreme_counter[last] > 3){
+						last_gpstime_diff[last] = gpstime_diff;
+						multi_extreme_counter[last] = 0;
+					}
+				}else{
+					multi = LASZIP_GPSTIME_MULTI - multi;
+
+					if (multi > LASZIP_GPSTIME_MULTI_MINUS){
+						gpstime_diff = ic_gpstime->decompress(multi*last_gpstime_diff[last], 5);
+					}else{
+						gpstime_diff = ic_gpstime->decompress(LASZIP_GPSTIME_MULTI_MINUS*last_gpstime_diff[last], 6);
+						multi_extreme_counter[last]++;
+						
+						if (multi_extreme_counter[last] > 3){
+							last_gpstime_diff[last] = gpstime_diff;
+							multi_extreme_counter[last] = 0;
+						}
+					}
+				}
+				last_gpstime[last].i64 += gpstime_diff;
+			}else if (multi ==  LASZIP_GPSTIME_MULTI_CODE_FULL){
+				next = (next+1)&3;
+				last_gpstime[next].u64 = ic_gpstime->decompress((int32_t)(last_gpstime[last].u64 >> 32), 8);
+				last_gpstime[next].u64 = last_gpstime[next].u64 << 32;
+				last_gpstime[next].u64 |= dec->readInt();
+				last = next;
+				last_gpstime_diff[last] = 0;
+				multi_extreme_counter[last] = 0; 
+			}else if (multi >=  LASZIP_GPSTIME_MULTI_CODE_FULL){
+				last = (last+multi-LASZIP_GPSTIME_MULTI_CODE_FULL)&3;
+				read(item, context);
+			}
+		}
+
+		*((int64_t*)item) = last_gpstime[last].i64;
+
+		uint64_t t_end = nanotime();
+		if(t_end > t_start){
+			t_readGps11 += t_end - t_start;
+		}
+	}
+
 };
 
 struct LASreadItemCompressed_RGB12_v2{
@@ -305,8 +470,11 @@ struct LASreadItemCompressed_RGB12_v2{
 		int32_t diff = 0;
 		uint32_t sym = dec->decodeSymbol(m_byte_used);
 
+		if(enableTrace) printf("sym: %u \n", sym);
+
 		if (sym & (1 << 0)){
 			corr = dec->decodeSymbol(m_rgb_diff_0);
+			if(enableTrace) printf("corr[10]: %u \n", corr);
 			((uint16_t*)item)[0] = (uint16_t)U8_FOLD(corr + (last_item[0]&255));
 		}else {
 			((uint16_t*)item)[0] = last_item[0]&0xFF;
@@ -314,6 +482,7 @@ struct LASreadItemCompressed_RGB12_v2{
 		
 		if (sym & (1 << 1)){
 			corr = dec->decodeSymbol(m_rgb_diff_1);
+			if(enableTrace) printf("corr[20]: %u \n", corr);
 			((uint16_t*)item)[0] |= (((uint16_t)U8_FOLD(corr + (last_item[0]>>8))) << 8);
 		}else{
 			((uint16_t*)item)[0] |= (last_item[0]&0xFF00);

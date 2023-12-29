@@ -68,13 +68,19 @@ struct ArithmeticDecoder{
 		return sym;
 	}
 
+	// LASZIP source: https://github.com/LASzip/LASzip/blob/80f929870f4ae2c3dc4e4f9e00e0e68f17ba1f1e/src/arithmeticdecoder.cpp#L182
+	// FastAC source: https://github.com/richgel999/FastAC/blob/f39296ce6abbdaca8f86fef9248285c88e262797/arithmetic_codec.cpp#L305
 	uint32_t decodeSymbol(ArithmeticModel* m){
 
 		uint64_t t_start = nanotime();
 
 		if(enableTrace) printf("decodeSymbol \n");
 
-		uint32_t n, sym, x, y = length;
+		uint32_t x   = 0;
+		uint32_t sym = 0;
+		uint32_t n   = m->symbols;
+		uint32_t y   = length;
+		
 
 		// NOTE: removed decoder table path
 		{// decode using only multiplications
@@ -82,26 +88,40 @@ struct ArithmeticDecoder{
 
 			// if(enableTrace) printf("    decode using only multiplications \n");
 
-			x = sym = 0;
-			length >>= DM__LengthShift;
-			uint32_t k = (n = m->symbols) >> 1;
+			length     = length >> DM__LengthShift;
+			uint32_t k = n >> 1;
 			
 			// decode via bisection search
 			int counter = 0;
+
+			if(enableTrace) printf("    do... while (k != sym); k = %i, sym = %i \n", k, sym);
 			do {
+				if(enableTrace) printf("\n        # iteration", k);
 				uint32_t z = length * m->distribution[k];
+				if(enableTrace) printf("        x     = %u \n", x);
+				if(enableTrace) printf("        sym   = %u \n", sym);
+				if(enableTrace) printf("        k     = %u \n", k);
+				if(enableTrace) printf("        z     = %u \n", z);
+				if(enableTrace) printf("        n     = %u \n", n);
+				if(enableTrace) printf("        d[k]  = %u \n", m->distribution[k]);
+				if(enableTrace) printf("        value = %u \n", value);
 
 				if (z > value) {
 					// value is smaller
 					n = k;
 					y = z;
+					if(enableTrace) printf("        value is smaller. n = %u, y = %u \n", k, z);
 				} else {
 					// value is larger or equal
 					sym = k;
 					x = z;
+					if(enableTrace) printf("        value is larger. sym = %u, x = %u \n", k, z);
 				}
 				counter++;
-			} while ((k = (sym + n) >> 1) != sym);
+
+				k = (sym + n) >> 1;
+			} while (k != sym);
+			if(enableTrace) printf("        loop done, k == sym == %u \n", k);
 
 			// if(counter > 10) printf("            counter_2 is large: %i \n", counter);
 			// if(enableTrace) printf("    counter_2: %i \n", counter);
@@ -212,6 +232,13 @@ struct ArithmeticDecoder{
 		}
 
 		return (uint16_t)sym;
+	}
+
+	uint32_t readInt(){
+		uint32_t lowerInt = readShort();
+		uint32_t upperInt = readShort();
+		
+		return (upperInt<<16) | lowerInt;
 	}
 
 	inline void renorm_dec_interval(){

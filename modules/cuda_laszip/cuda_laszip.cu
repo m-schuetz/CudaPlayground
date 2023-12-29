@@ -178,11 +178,9 @@ void kernel_read_chunk_infos(
 		*dec = ArithmeticDecoder(chunkTableBuffer, 8);
 
 		IntegerCompressor* ic = g_allocator->alloc<IntegerCompressor>(1);
-		*ic = IntegerCompressor(dec, 32, 2);
+		ic->init(dec, 32, 2);
 		ic->initDecompressor(g_allocator);
 
-		// int32_t* chunk_sizes = (int32_t*)g_allocator->alloc(4 * numChunks);
-		// for (int i = 0; i < numChunks; i++) chunk_sizes[i] = 0;
 
 		// read chunk byte sizes
 		for (int i = 0; i < numChunks; i++) {
@@ -230,7 +228,14 @@ void kernel(
 
 	if(grid.thread_rank() == 0){
 
-		
+		int64_t offset_rgb = 0;
+		if(lasheader->point_data_format % 128 == 2) offset_rgb = 20;
+		if(lasheader->point_data_format % 128 == 3) offset_rgb = 28;
+
+		int64_t offset_gps = 20;
+
+		printf("lasheader->point_data_format: %i \n", lasheader->point_data_format);
+		printf("offset_rgb: %i \n", offset_rgb);
 
 		// int chunkIndex = 0;
 		// Chunk chunk = chunks[chunkIndex];
@@ -243,9 +248,23 @@ void kernel(
 		int Y = readAs<int32_t>(input, chunk.byteOffset + 4);
 		int Z = readAs<int32_t>(input, chunk.byteOffset + 8);
 
-		uint16_t R = readAs<uint16_t>(input, chunk.byteOffset + 20);
-		uint16_t G = readAs<uint16_t>(input, chunk.byteOffset + 22);
-		uint16_t B = readAs<uint16_t>(input, chunk.byteOffset + 24);
+		uint16_t R = readAs<uint16_t>(input, chunk.byteOffset + offset_rgb + 0);
+		uint16_t G = readAs<uint16_t>(input, chunk.byteOffset + offset_rgb + 2);
+		uint16_t B = readAs<uint16_t>(input, chunk.byteOffset + offset_rgb + 4);
+
+		uint16_t intensity = readAs<uint16_t>(input, chunk.byteOffset + 12);
+		uint8_t returnNumber = readAs<uint8_t>(input, chunk.byteOffset + 14);
+		uint8_t classification = readAs<uint8_t>(input, chunk.byteOffset + 15);
+		double gpsTime = readAs<double>(input, chunk.byteOffset + offset_gps);
+
+		printf("[%i] XYZ: %i, %i, %i   RGB:  %i, %i, %i  intensity: %i, Class.: %i, GPS: %f \n", 
+			0, 
+			X, Y, Z, 
+			R, G, B,
+			intensity, 
+			classification, 
+			float(gpsTime)
+		);
 
 		// Now start decompressing further points
 		auto dec = new ArithmeticDecoder(chunkBuffer, lasheader->recordLength);
@@ -254,27 +273,43 @@ void kernel(
 
 		__shared__ LASreadItemCompressed_POINT10_v2 readerPoint10;
 		__shared__ LASreadItemCompressed_RGB12_v2 readerRgb12;
+		__shared__ LASreadItemCompressed_GPSTIME11_v2 readerGps11;
 
 		// printf("sizeof(LASreadItemCompressed_POINT10_v2): %llu \n", sizeof(LASreadItemCompressed_POINT10_v2)); 
 		// printf("sizeof(LASreadItemCompressed_RGB12_v2): %llu \n", sizeof(LASreadItemCompressed_RGB12_v2)); 
 
 		// printf("%i, %i, %i    -    %i, %i, %i \n", X, Y, Z, R, G, B);
 
-		uint32_t context = 0;
-		uint8_t itemPoint10[20] = { 0 };
-		memcpy(itemPoint10 + 0, &X, 4);
-		memcpy(itemPoint10 + 4, &Y, 4);
-		memcpy(itemPoint10 + 8, &Z, 4);
+		laszip_point lazpoint;
+		uint8_t* ptr_XYZ = (uint8_t*)&lazpoint.X;
+		uint8_t* ptr_GPS = (uint8_t*)&lazpoint.gps_time;
+		uint8_t* ptr_RGB = (uint8_t*)&lazpoint.rgb[0];
 
-		uint8_t itemRgb12[6] = { 0 };
-		memcpy(itemRgb12 + 0, &R, 2);
-		memcpy(itemRgb12 + 2, &G, 2);
-		memcpy(itemRgb12 + 4, &B, 2);
+		memset(&lazpoint, 0, sizeof(laszip_point));
+
+		lazpoint.X = X;
+		lazpoint.Y = Y;
+		lazpoint.Z = Z;
+		lazpoint.intensity = intensity;
+		lazpoint.gps_time = gpsTime;
+
+		// return number is a bit tricky since it's a bit field
+		// access return number via intensity + 2, 
+		// and copy our return number which also contains the other bitfield components
+		uint8_t* ptrIntensity = (uint8_t*)(&lazpoint.intensity);
+		memcpy(ptrIntensity + 2, &returnNumber, 1); 
+		lazpoint.classification = classification;
+
+		lazpoint.rgb[0] = R;
+		lazpoint.rgb[1] = G;
+		lazpoint.rgb[2] = B;
 
 		// enableTrace = true;
 		
-		readerPoint10.init(dec, itemPoint10, context, g_allocator);
-		readerRgb12.init(dec, itemRgb12, context, g_allocator);
+		uint32_t context = 0;
+		readerPoint10.init(dec, ptr_XYZ, context, g_allocator);
+		readerGps11.init(dec, ptr_GPS, context, g_allocator);
+		readerRgb12.init(dec, ptr_RGB, context, g_allocator);
 
 		enableTrace = false;
 
@@ -282,29 +317,42 @@ void kernel(
 
 		// for (int i = 1; i < 2; i++) 
 		uint64_t t_start = nanotime();
+		// for (int i = 1; i < 5; i++) 
 		for (int i = 1; i < 50'000; i++) 
 		{
 			dbg_pointIndex = i;
 			// enableTrace = (i >= 20'000 && i < 20'001);
+			// enableTrace = (i == 1000);
 
 			if(enableTrace) printf("========================== \n");
 			if(enableTrace) printf("== DECODING POINT %i \n", dbg_pointIndex);
 			if(enableTrace) printf("========================= \n");
-
 			
-			readerPoint10.read(itemPoint10, context, g_allocator);
-			readerRgb12.read(itemRgb12, context);
+			readerPoint10.read(ptr_XYZ, context, g_allocator);
+			readerGps11.read(ptr_GPS, context);
+			readerRgb12.read(ptr_RGB, context);
 
 			if(i < 5 || i == 49'999){
-				int32_t X = readAs<int32_t>(itemPoint10, 0);
-				int32_t Y = readAs<int32_t>(itemPoint10, 4);
-				int32_t Z = readAs<int32_t>(itemPoint10, 8);
+				int32_t X = readAs<int32_t>(ptr_XYZ, 0);
+				int32_t Y = readAs<int32_t>(ptr_XYZ, 4);
+				int32_t Z = readAs<int32_t>(ptr_XYZ, 8);
 
-				uint16_t R = readAs<uint16_t>(itemRgb12, 0);
-				uint16_t G = readAs<uint16_t>(itemRgb12, 2);
-				uint16_t B = readAs<uint16_t>(itemRgb12, 4);
+				uint16_t R = readAs<uint16_t>(ptr_RGB, 0);
+				uint16_t G = readAs<uint16_t>(ptr_RGB, 2);
+				uint16_t B = readAs<uint16_t>(ptr_RGB, 4);
 
-				printf("%i, %i, %i    -    %i, %i, %i \n", X, Y, Z, R, G, B);
+				int intensity = readAs<uint16_t>(ptr_XYZ, 12);
+				int classification = readAs<uint8_t>(ptr_XYZ, 15);
+				double gpsTime = readAs<double>(ptr_GPS, 0);
+
+				printf("[%i] XYZ: %i, %i, %i   RGB:  %i, %i, %i  intensity: %i, Class.: %i, GPS: %f \n", 
+					i, 
+					X, Y, Z, 
+					R, G, B,
+					intensity, 
+					classification, 
+					float(gpsTime)
+				);
 			}
 
 		}
@@ -317,8 +365,9 @@ void kernel(
 		printf("======================================================= \n");
 
 		printf("t_readPoint10:   %5.1f ms \n", float(double(t_readPoint10) / 1'000'000.0));
+		printf("t_readGps11:     %5.1f ms \n", float(double(t_readGps11) / 1'000'000.0));
 		printf("t_readRgb12:     %5.1f ms \n", float(double(t_readRgb12) / 1'000'000.0));
-		printf("sum:             %5.1f ms \n", float(double(t_readPoint10 + t_readRgb12) / 1'000'000.0));
+		printf("sum:             %5.1f ms \n", float(double(t_readPoint10 + t_readGps11 + t_readRgb12) / 1'000'000.0));
 		printf("update:          %5.1f ms \n", float(double(t_update) / 1'000'000.0));
 		printf("decodeSymbol:    %5.1f ms \n", float(double(t_decodeSymbol) / 1'000'000.0));
 		printf("decodeSymbols_0: %5.1f ms \n", float(double(t_decodeSymbols_0) / 1'000'000.0));

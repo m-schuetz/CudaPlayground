@@ -30,7 +30,11 @@ struct IntegerCompressor{
 	ArithmeticModel** mBits;
 	ArithmeticModel** mCorrector;
 
-	IntegerCompressor(ArithmeticDecoder* dec, uint32_t bits = 16, uint32_t contexts = 1, uint32_t bits_high = 8, uint32_t range = 0){
+	IntegerCompressor(){
+		
+	}
+
+	void init(ArithmeticDecoder* dec, uint32_t bits = 16, uint32_t contexts = 1, uint32_t bits_high = 8, uint32_t range = 0){
 		this->dec = dec;
 		this->bits = bits;
 		this->contexts = contexts;
