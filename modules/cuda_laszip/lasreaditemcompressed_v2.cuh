@@ -45,28 +45,6 @@ struct LASreadItemCompressed_POINT10_v2{
 	IntegerCompressor* ic_dy;
 	IntegerCompressor* ic_z;
 
-	LASreadItemCompressed_POINT10_v2(){
-
-	}
-
-	~LASreadItemCompressed_POINT10_v2(){
-		uint32_t i;
-
-		delete m_changed_values;
-		delete ic_intensity;
-		delete m_scan_angle_rank[0];
-		delete m_scan_angle_rank[1];
-		delete ic_point_source_ID;
-		for (i = 0; i < 256; i++){
-			if (m_bit_byte[i]) delete m_bit_byte[i];
-			if (m_classification[i]) delete m_classification[i];
-			if (m_user_data[i]) delete m_user_data[i];
-		}
-		delete ic_dx;
-		delete ic_dy;
-		delete ic_z;
-	}
-
 	bool init(ArithmeticDecoder* dec, 
 		const uint8_t* item, 
 		uint32_t& context, 
@@ -151,6 +129,9 @@ struct LASreadItemCompressed_POINT10_v2{
 
 	void read(uint8_t* item, uint32_t& context, AllocatorGlobal* allocator){
 
+		auto grid = cg::this_grid();
+
+
 		uint64_t t_start = nanotime();
 
 		uint32_t r, n, m, l;
@@ -159,6 +140,8 @@ struct LASreadItemCompressed_POINT10_v2{
 
 		// decompress which other values have changed
 		int32_t changed_values = dec->decodeSymbol(m_changed_values);
+		
+		if(grid.thread_rank() != 0) return;
 
 		if(enableTrace) printf("changed_values: %i \n", changed_values);
 
@@ -283,10 +266,6 @@ struct LASreadItemCompressed_GPSTIME11_v2{
 	ArithmeticModel* m_gpstime_0diff;
 	IntegerCompressor* ic_gpstime;
 
-	LASreadItemCompressed_GPSTIME11_v2(){
-
-	}
-
 	bool init(ArithmeticDecoder* dec, const uint8_t* item, uint32_t& context, AllocatorGlobal* allocator){
 		this->dec = dec;
 
@@ -320,6 +299,10 @@ struct LASreadItemCompressed_GPSTIME11_v2{
 	}
 
 	inline void read(uint8_t* item, uint32_t& context){
+
+		auto grid = cg::this_grid();
+
+		if(grid.thread_rank() != 0) return;
 
 		uint64_t t_start = nanotime();
 
@@ -429,10 +412,6 @@ struct LASreadItemCompressed_RGB12_v2{
 	ArithmeticModel* m_rgb_diff_4;
 	ArithmeticModel* m_rgb_diff_5;
 
-	LASreadItemCompressed_RGB12_v2(){
-
-	}
-
 	bool init(ArithmeticDecoder* dec, const uint8_t* item, uint32_t& context, AllocatorGlobal* allocator){
 
 		{ // former constructor stuff
@@ -463,6 +442,10 @@ struct LASreadItemCompressed_RGB12_v2{
 	}
 
 	inline void read(uint8_t* item, uint32_t& context){
+
+		auto grid = cg::this_grid();
+
+		if(grid.thread_rank() != 0) return;
 
 		uint64_t t_start = nanotime();
 

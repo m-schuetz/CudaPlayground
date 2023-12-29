@@ -72,6 +72,12 @@ struct ArithmeticDecoder{
 	// FastAC source: https://github.com/richgel999/FastAC/blob/f39296ce6abbdaca8f86fef9248285c88e262797/arithmetic_codec.cpp#L305
 	uint32_t decodeSymbol(ArithmeticModel* m){
 
+		auto grid = cg::this_grid();
+		auto block = cg::this_thread_block();
+
+		block.sync();
+		cg::coalesced_group active = cg::coalesced_threads();
+
 		uint64_t t_start = nanotime();
 
 		if(enableTrace) printf("decodeSymbol \n");
@@ -80,7 +86,47 @@ struct ArithmeticDecoder{
 		uint32_t sym = 0;
 		uint32_t n   = m->symbols;
 		uint32_t y   = length;
+		length     = length >> DM__LengthShift;
+
+		bool enableTrace = false;
+		bool testWarpVersion = false;
+		uint32_t _warp_sym = 0;
+		uint32_t _warp_x = 0;
+		uint32_t _warp_y = 0;
+
+		__shared__ int sh_index;
+
+		if(active.num_threads() > 1){
+
+			// enableTrace = true;
+			testWarpVersion = true;
+			
+			for(int i = active.thread_rank(); i < m->symbols; i += active.num_threads()){
+				
+				uint32_t z_0 = length * m->distribution[i + 0];
+				uint32_t z_1 = length * m->distribution[i + 1];
+
+				bool isMatch = z_0 <= value && value < z_1;
+
+				printf("[t: %2i, i: %3i] calling decodeSymbol with %i active threads. #symbols: %i, %s \n", 
+					active.thread_rank(), i, active.num_threads(), m->symbols, isMatch ? "match found!" : ""
+				);
+
+				if(isMatch){
+					sh_index = i;
+				}
+
+				active.sync();
+			}
+
+			active.sync();
+
+			_warp_sym = sh_index;
+			_warp_x = length * m->distribution[_warp_sym + 0];
+			_warp_y = length * m->distribution[_warp_sym + 1];
+		}
 		
+		if(grid.thread_rank() != 0) return;
 
 		// NOTE: removed decoder table path
 		{// decode using only multiplications
@@ -88,7 +134,7 @@ struct ArithmeticDecoder{
 
 			// if(enableTrace) printf("    decode using only multiplications \n");
 
-			length     = length >> DM__LengthShift;
+			
 			uint32_t k = n >> 1;
 			
 			// decode via bisection search
@@ -99,6 +145,7 @@ struct ArithmeticDecoder{
 				if(enableTrace) printf("\n        # iteration", k);
 				uint32_t z = length * m->distribution[k];
 				if(enableTrace) printf("        x     = %u \n", x);
+				if(enableTrace) printf("        y     = %u \n", y);
 				if(enableTrace) printf("        sym   = %u \n", sym);
 				if(enableTrace) printf("        k     = %u \n", k);
 				if(enableTrace) printf("        z     = %u \n", z);
@@ -121,7 +168,11 @@ struct ArithmeticDecoder{
 
 				k = (sym + n) >> 1;
 			} while (k != sym);
+
 			if(enableTrace) printf("        loop done, k == sym == %u \n", k);
+			if(enableTrace) printf("        x     = %u \n", x);
+			if(enableTrace) printf("        y     = %u \n", y);
+			if(enableTrace) printf("        sym   = %u \n", sym);
 
 			// if(counter > 10) printf("            counter_2 is large: %i \n", counter);
 			// if(enableTrace) printf("    counter_2: %i \n", counter);
@@ -130,6 +181,17 @@ struct ArithmeticDecoder{
 			if(t_end_decodeSymbols_1 > t_start_decodeSymbols_1){
 				t_decodeSymbols_1 += (t_end_decodeSymbols_1 - t_start_decodeSymbols_1);
 			}
+		}
+
+		if(testWarpVersion){
+
+			if(_warp_sym != sym) printf("sym mismatch \n");
+			if(_warp_x != x) printf("x mismatch \n");
+			if(_warp_y != y) printf("y mismatch \n");
+
+			// printf("sym: got %u, should be %u. %s \n", _warp_sym, sym, _warp_sym == sym ? "yeah!" : "... oh no");
+			// printf("x: got %u, should be %u. %s \n", _warp_x, x, _warp_x == x ? "yeah!" : "... oh no");
+			// printf("y: got %u, should be %u. %s \n", _warp_y, y, _warp_y == y ? "yeah!" : "... oh no");
 		}
 
 		// update interval
