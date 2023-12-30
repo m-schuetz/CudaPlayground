@@ -130,6 +130,8 @@ struct LASreadItemCompressed_POINT10_v2{
 	void read(uint8_t* item, uint32_t& context, AllocatorGlobal* allocator){
 
 		auto grid = cg::this_grid();
+		// auto block = cg::this_thread_block();
+		cg::coalesced_group active = cg::coalesced_threads();
 
 
 		uint64_t t_start = nanotime();
@@ -139,13 +141,16 @@ struct LASreadItemCompressed_POINT10_v2{
 		int32_t median, diff;
 
 		// decompress which other values have changed
-		int32_t changed_values = dec->decodeSymbol(m_changed_values);
-		
-		if(grid.thread_rank() != 0) return;
+		// int32_t changed_values = dec->decodeSymbol(m_changed_values);
+		uint32_t changed_values;
+		dec->decodeSymbol_warp(m_changed_values, &changed_values);
+
+		// if(active.thread_rank() != 0) return;
 
 		if(enableTrace) printf("changed_values: %i \n", changed_values);
 
-		if (changed_values) {
+
+		if (changed_values && active.thread_rank() == 0) {
 
 			// decompress the edge_of_flight_line, scan_direction_flag, ... if it has changed
 			if (changed_values & 32) {
@@ -213,35 +218,40 @@ struct LASreadItemCompressed_POINT10_v2{
 			l = number_return_level[n][r];
 		}
 
+		// if(block.thread_rank() != 0) return;
+
 		// decompress x coordinate
 		if(enableTrace) printf("decompress x coordinate \n");
 		median = last_x_diff_median5[m].get();
 		diff = ic_dx->decompress(median, n==1);
-		((LASpoint10*)last_item)->x += diff;
-		last_x_diff_median5[m].add(diff);
 
-		// decompress y coordinate
-		if(enableTrace) printf("decompress y coordinate \n");
-		median = last_y_diff_median5[m].get();
-		k_bits = ic_dx->getK();
-		diff = ic_dy->decompress(median, (n==1) + ( k_bits < 20 ? U32_ZERO_BIT_0(k_bits) : 20 ));
-		((LASpoint10*)last_item)->y += diff;
-		last_y_diff_median5[m].add(diff);
+		if(active.thread_rank() == 0){
+			((LASpoint10*)last_item)->x += diff;
+			last_x_diff_median5[m].add(diff);
+		
 
-		// decompress z coordinate
-		if(enableTrace) printf("decompress z coordinate \n");
-		k_bits = (ic_dx->getK() + ic_dy->getK()) / 2;
-		((LASpoint10*)last_item)->z = ic_z->decompress(last_height[l], (n==1) + (k_bits < 18 ? U32_ZERO_BIT_0(k_bits) : 18));
-		last_height[l] = ((LASpoint10*)last_item)->z;
+			// decompress y coordinate
+			if(enableTrace) printf("decompress y coordinate \n");
+			median = last_y_diff_median5[m].get();
+			k_bits = ic_dx->getK();
+			diff = ic_dy->decompress(median, (n==1) + ( k_bits < 20 ? U32_ZERO_BIT_0(k_bits) : 20 ));
+			((LASpoint10*)last_item)->y += diff;
+			last_y_diff_median5[m].add(diff);
 
-		// copy the last point
-		memcpy(item, last_item, 20);
+			// decompress z coordinate
+			if(enableTrace) printf("decompress z coordinate \n");
+			k_bits = (ic_dx->getK() + ic_dy->getK()) / 2;
+			((LASpoint10*)last_item)->z = ic_z->decompress(last_height[l], (n==1) + (k_bits < 18 ? U32_ZERO_BIT_0(k_bits) : 18));
+			last_height[l] = ((LASpoint10*)last_item)->z;
 
-		uint64_t t_end = nanotime();
-		if(t_end > t_start){
-			t_readPoint10 += t_end - t_start;
+			// copy the last point
+			memcpy(item, last_item, 20);
+
+			uint64_t t_end = nanotime();
+			if(t_end > t_start){
+				t_readPoint10 += t_end - t_start;
+			}
 		}
-
 	}
 
 	//~LASreadItemCompressed_POINT10_v2();

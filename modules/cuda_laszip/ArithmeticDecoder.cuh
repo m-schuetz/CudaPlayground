@@ -68,14 +68,229 @@ struct ArithmeticDecoder{
 		return sym;
 	}
 
+	// // LASZIP source: https://github.com/LASzip/LASzip/blob/80f929870f4ae2c3dc4e4f9e00e0e68f17ba1f1e/src/arithmeticdecoder.cpp#L182
+	// // FastAC source: https://github.com/richgel999/FastAC/blob/f39296ce6abbdaca8f86fef9248285c88e262797/arithmetic_codec.cpp#L305
+	// uint32_t decodeSymbol(ArithmeticModel* m){
+
+	// 	auto grid = cg::this_grid();
+	// 	// auto block = cg::this_thread_block();
+
+	// 	cg::coalesced_group active = cg::coalesced_threads();
+
+	// 	uint64_t t_start = nanotime();
+
+	// 	if(enableTrace) printf("decodeSymbol \n");
+
+	// 	uint32_t x   = 0;
+	// 	uint32_t sym = 0;
+	// 	uint32_t n   = m->symbols;
+	// 	uint32_t y   = length;
+
+	// 	if(active.thread_rank() == 0){
+	// 		length     = length >> DM__LengthShift;
+	// 	}
+	// 	active.sync();
+
+	// 	bool enableTrace = false;
+	// 	bool testWarpVersion = false;
+	// 	uint32_t _warp_sym = 0;
+	// 	uint32_t _warp_x = 0;
+	// 	uint32_t _warp_y = 0;
+
+	// 	__shared__ int sh_index;
+	// 	sh_index = -1;
+	// 	active.sync();
+
+	// 	if(active.num_threads() > 1){
+
+	// 		// enableTrace = true;
+	// 		testWarpVersion = true;
+			
+	// 		for(int i = active.thread_rank(); i < m->symbols; i += active.num_threads()){
+				
+	// 			uint32_t z_0 = length * m->distribution[i + 0];
+	// 			uint32_t z_1 = length * m->distribution[i + 1];
+
+	// 			bool isMatch = z_0 <= value && value < z_1;
+
+	// 			// printf("[t: %2i, i: %3i] calling decodeSymbol with %i active threads. #symbols: %i, %s \n", 
+	// 			// 	active.thread_rank(), i, active.num_threads(), m->symbols, isMatch ? "match found!" : ""
+	// 			// );
+
+	// 			if(isMatch){
+	// 				sh_index = i;
+	// 			}
+	// 		}
+
+	// 		active.sync();
+
+	// 		_warp_sym = sh_index;
+	// 		_warp_x = length * m->distribution[_warp_sym + 0];
+	// 		_warp_y = length * m->distribution[_warp_sym + 1];
+
+	// 		if(active.thread_rank() == 0){
+	// 			printf("[%i] Checked %i symbols, found match at %i \n", dbg_pointIndex, m->symbols, sh_index);
+	// 		}
+	// 	}
+
+	// 	// NOTE: removed decoder table path
+	// 	if(active.thread_rank() == 0)
+	// 	{// decode using only multiplications
+	// 		uint64_t t_start_decodeSymbols_1 = nanotime();
+
+	// 		uint32_t k = n >> 1;
+			
+	// 		// decode via bisection search
+	// 		int counter = 0;
+
+	// 		do {
+	// 			uint32_t z = length * m->distribution[k];
+
+	// 			if (z > value) {
+	// 				// value is smaller
+	// 				n = k;
+	// 				y = z;
+	// 			} else {
+	// 				// value is larger or equal
+	// 				sym = k;
+	// 				x = z;
+	// 			}
+	// 			counter++;
+
+	// 			k = (sym + n) >> 1;
+	// 		} while (k != sym);
+
+	// 		uint64_t t_end_decodeSymbols_1 = nanotime();
+	// 		if(t_end_decodeSymbols_1 > t_start_decodeSymbols_1){
+	// 			t_decodeSymbols_1 += (t_end_decodeSymbols_1 - t_start_decodeSymbols_1);
+	// 		}
+	// 	}
+
+	// 	if(active.thread_rank() == 0){
+	// 		// if(testWarpVersion){
+
+	// 		// 	if(_warp_sym != sym) printf("sym mismatch \n");
+	// 		// 	if(_warp_x != x) printf("x mismatch \n");
+	// 		// 	if(_warp_y != y) printf("y mismatch \n");
+
+	// 		// 	if(_warp_sym == sym && _warp_x == x && _warp_y == y){
+	// 		// 		printf("match checks out! \n");
+	// 		// 	}else{
+	// 		// 		printf("match doesnt check out... \n");
+	// 		// 	}
+	// 		// }
+
+	// 		// update interval
+	// 		value -= x;
+	// 		length = y - x;
+
+	// 		// renormalization
+	// 		if (length < AC__MinLength){ 
+	// 			renorm_dec_interval();
+	// 		}
+
+	// 		m->symbol_count[sym]++;
+	// 		m->symbols_until_update--;
+
+	// 		// periodic model update
+	// 		if (m->symbols_until_update == 0){
+	// 			m->update();
+	// 		}
+	// 	}
+
+	// 	uint64_t t_end = nanotime();
+	// 	if(t_end > t_start){
+	// 		t_decodeSymbol += (t_end - t_start);
+	// 	}
+
+	// 	return sym;
+	// }
+
 	// LASZIP source: https://github.com/LASzip/LASzip/blob/80f929870f4ae2c3dc4e4f9e00e0e68f17ba1f1e/src/arithmeticdecoder.cpp#L182
 	// FastAC source: https://github.com/richgel999/FastAC/blob/f39296ce6abbdaca8f86fef9248285c88e262797/arithmetic_codec.cpp#L305
 	uint32_t decodeSymbol(ArithmeticModel* m){
 
 		auto grid = cg::this_grid();
-		auto block = cg::this_thread_block();
+		cg::coalesced_group active = cg::coalesced_threads();
 
-		block.sync();
+		uint32_t x   = 0;
+		uint32_t sym = 0;
+		uint32_t n   = m->symbols;
+		uint32_t y   = length;
+
+		if(active.thread_rank() == 0){
+
+			uint64_t t_start = nanotime();
+
+			if(enableTrace) printf("decodeSymbol \n");
+			
+			length     = length >> DM__LengthShift;
+			
+			// NOTE: removed decoder table path
+			{// decode using only multiplications
+				uint64_t t_start_decodeSymbols_1 = nanotime();
+
+				uint32_t k = n >> 1;
+				
+				// decode via bisection search
+				int counter = 0;
+
+				do {
+					uint32_t z = length * m->distribution[k];
+
+					if (z > value) {
+						// value is smaller
+						n = k;
+						y = z;
+					} else {
+						// value is larger or equal
+						sym = k;
+						x = z;
+					}
+					counter++;
+
+					k = (sym + n) >> 1;
+				} while (k != sym);
+
+				uint64_t t_end_decodeSymbols_1 = nanotime();
+				if(t_end_decodeSymbols_1 > t_start_decodeSymbols_1){
+					t_decodeSymbols_1 += (t_end_decodeSymbols_1 - t_start_decodeSymbols_1);
+				}
+			}
+
+			// update interval
+			value -= x;
+			length = y - x;
+
+			// renormalization
+			if (length < AC__MinLength){ 
+				renorm_dec_interval();
+			}
+
+			m->symbol_count[sym]++;
+			m->symbols_until_update--;
+
+			// periodic model update
+			if (m->symbols_until_update == 0){
+				m->update();
+			}
+			
+
+			uint64_t t_end = nanotime();
+			if(t_end > t_start){
+				t_decodeSymbol += (t_end - t_start);
+			}
+		}
+
+		// all threads grab the sym value from thread 0
+		// sym = active.shfl(sym, 0);
+
+		return sym;
+	}
+
+	void decodeSymbol_warp(ArithmeticModel* m, uint32_t* result){
+
+		auto grid = cg::this_grid();
 		cg::coalesced_group active = cg::coalesced_threads();
 
 		uint64_t t_start = nanotime();
@@ -84,23 +299,22 @@ struct ArithmeticDecoder{
 
 		uint32_t x   = 0;
 		uint32_t sym = 0;
-		uint32_t n   = m->symbols;
+		// uint32_t n   = m->symbols;
 		uint32_t y   = length;
-		length     = length >> DM__LengthShift;
 
-		bool enableTrace = false;
-		bool testWarpVersion = false;
-		uint32_t _warp_sym = 0;
-		uint32_t _warp_x = 0;
-		uint32_t _warp_y = 0;
+		if(active.thread_rank() == 0){
+			length     = length >> DM__LengthShift;
+		}
+
+		active.sync();
 
 		__shared__ int sh_index;
+		sh_index = -1;
+		active.sync();
 
-		if(active.num_threads() > 1){
+		// if(active.num_threads() > 1)
+		{
 
-			// enableTrace = true;
-			testWarpVersion = true;
-			
 			for(int i = active.thread_rank(); i < m->symbols; i += active.num_threads()){
 				
 				uint32_t z_0 = length * m->distribution[i + 0];
@@ -108,115 +322,54 @@ struct ArithmeticDecoder{
 
 				bool isMatch = z_0 <= value && value < z_1;
 
-				printf("[t: %2i, i: %3i] calling decodeSymbol with %i active threads. #symbols: %i, %s \n", 
-					active.thread_rank(), i, active.num_threads(), m->symbols, isMatch ? "match found!" : ""
-				);
+				// printf("[t: %2i, i: %3i] calling decodeSymbol with %i active threads. #symbols: %i, %s \n", 
+				// 	active.thread_rank(), i, active.num_threads(), m->symbols, isMatch ? "match found!" : ""
+				// );
 
 				if(isMatch){
 					sh_index = i;
 				}
-
-				active.sync();
 			}
 
 			active.sync();
 
-			_warp_sym = sh_index;
-			_warp_x = length * m->distribution[_warp_sym + 0];
-			_warp_y = length * m->distribution[_warp_sym + 1];
+			sym = sh_index;
+			x = length * m->distribution[sym + 0];
+			y = length * m->distribution[sym + 1];
+
+			active.sync();
+
+			// if(active.thread_rank() == 0){
+			// 	printf("[%i] Checked %i symbols, found match at %i \n", dbg_pointIndex, m->symbols, sh_index);
+			// }
 		}
-		
-		if(grid.thread_rank() != 0) return;
 
-		// NOTE: removed decoder table path
-		{// decode using only multiplications
-			uint64_t t_start_decodeSymbols_1 = nanotime();
+		if(active.thread_rank() == 0){
+			// update interval
+			value -= x;
+			length = y - x;
 
-			// if(enableTrace) printf("    decode using only multiplications \n");
+			// renormalization
+			if (length < AC__MinLength){ 
+				renorm_dec_interval();
+			}
 
-			
-			uint32_t k = n >> 1;
-			
-			// decode via bisection search
-			int counter = 0;
+			m->symbol_count[sym]++;
+			m->symbols_until_update--;
 
-			if(enableTrace) printf("    do... while (k != sym); k = %i, sym = %i \n", k, sym);
-			do {
-				if(enableTrace) printf("\n        # iteration", k);
-				uint32_t z = length * m->distribution[k];
-				if(enableTrace) printf("        x     = %u \n", x);
-				if(enableTrace) printf("        y     = %u \n", y);
-				if(enableTrace) printf("        sym   = %u \n", sym);
-				if(enableTrace) printf("        k     = %u \n", k);
-				if(enableTrace) printf("        z     = %u \n", z);
-				if(enableTrace) printf("        n     = %u \n", n);
-				if(enableTrace) printf("        d[k]  = %u \n", m->distribution[k]);
-				if(enableTrace) printf("        value = %u \n", value);
+			// periodic model update
+			if (m->symbols_until_update == 0){
+				m->update();
+			}
 
-				if (z > value) {
-					// value is smaller
-					n = k;
-					y = z;
-					if(enableTrace) printf("        value is smaller. n = %u, y = %u \n", k, z);
-				} else {
-					// value is larger or equal
-					sym = k;
-					x = z;
-					if(enableTrace) printf("        value is larger. sym = %u, x = %u \n", k, z);
-				}
-				counter++;
+			*result = sym;
 
-				k = (sym + n) >> 1;
-			} while (k != sym);
-
-			if(enableTrace) printf("        loop done, k == sym == %u \n", k);
-			if(enableTrace) printf("        x     = %u \n", x);
-			if(enableTrace) printf("        y     = %u \n", y);
-			if(enableTrace) printf("        sym   = %u \n", sym);
-
-			// if(counter > 10) printf("            counter_2 is large: %i \n", counter);
-			// if(enableTrace) printf("    counter_2: %i \n", counter);
-
-			uint64_t t_end_decodeSymbols_1 = nanotime();
-			if(t_end_decodeSymbols_1 > t_start_decodeSymbols_1){
-				t_decodeSymbols_1 += (t_end_decodeSymbols_1 - t_start_decodeSymbols_1);
+			uint64_t t_end = nanotime();
+			if(t_end > t_start){
+				t_decodeSymbol += (t_end - t_start);
 			}
 		}
-
-		if(testWarpVersion){
-
-			if(_warp_sym != sym) printf("sym mismatch \n");
-			if(_warp_x != x) printf("x mismatch \n");
-			if(_warp_y != y) printf("y mismatch \n");
-
-			// printf("sym: got %u, should be %u. %s \n", _warp_sym, sym, _warp_sym == sym ? "yeah!" : "... oh no");
-			// printf("x: got %u, should be %u. %s \n", _warp_x, x, _warp_x == x ? "yeah!" : "... oh no");
-			// printf("y: got %u, should be %u. %s \n", _warp_y, y, _warp_y == y ? "yeah!" : "... oh no");
-		}
-
-		// update interval
-		value -= x;
-		length = y - x;
-
-		// renormalization
-		if (length < AC__MinLength){ 
-			renorm_dec_interval();
-		}
-
-		m->symbol_count[sym]++;
-		m->symbols_until_update--;
-
-		// periodic model update
-		if (m->symbols_until_update == 0){
-			m->update();
-		}
-
-		uint64_t t_end = nanotime();
-		if(t_end > t_start){
-			t_decodeSymbol += (t_end - t_start);
-		}
-
-		return sym;
+		
 	}
 
 	uint32_t readBit(){
@@ -304,6 +457,9 @@ struct ArithmeticDecoder{
 	}
 
 	inline void renorm_dec_interval(){
+		cg::coalesced_group active = cg::coalesced_threads();
+
+		if(active.thread_rank() != 0) return;
 
 		uint64_t t_start = nanotime();
 

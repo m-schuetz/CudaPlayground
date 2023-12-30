@@ -320,7 +320,7 @@ void kernel(
 	
 	// for (int i = 1; i < 2; i++) 
 	uint64_t t_start = nanotime();
-	for (int i = 1; i < 2; i++) 
+	for (int i = 1; i < 5; i++) 
 	// for (int i = 1; i < 50'000; i++) 
 	{
 		dbg_pointIndex = i;
@@ -334,8 +334,11 @@ void kernel(
 		}
 		
 		readerPoint10.read(ptr_XYZ, context, g_allocator);
-		readerGps11.read(ptr_GPS, context);
-		readerRgb12.read(ptr_RGB, context);
+
+		if(grid.thread_rank() == 0){
+			readerGps11.read(ptr_GPS, context);
+			readerRgb12.read(ptr_RGB, context);
+		}
 
 		if(i < 5 || i == 49'999){
 			int32_t X = readAs<int32_t>(ptr_XYZ, 0);
