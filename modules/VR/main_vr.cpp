@@ -22,11 +22,16 @@
 
 #include "HostDeviceInterface.h"
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
 using namespace std;
 
 CUdeviceptr cptr_buffer;
 CUdeviceptr cptr_positions, cptr_uvs, cptr_colors;
 CUdeviceptr cptr_texture;
+
+Skybox skybox;
 
 View viewLeft;
 View viewRight;
@@ -230,7 +235,7 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 		&uniforms, &cptr_buffer, 
 		&output_main, &output_vr_left, &output_vr_right,
 		&model->numTriangles, &cptr_positions, &cptr_uvs, &cptr_colors,
-		&cptr_texture
+		&cptr_texture, &skybox
 	};
 
 	auto res_launch = cuLaunchCooperativeKernel(cuda_program->kernels["kernel"],
@@ -271,7 +276,7 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 void initCudaProgram(
 	shared_ptr<GLRenderer> renderer, 
 	shared_ptr<ObjData> model, 
-	vector<uint32_t>& texture
+	uint8_t* texture
 ){
 
 	uint64_t bufferSize = 1'000'000'000;
@@ -285,7 +290,7 @@ void initCudaProgram(
 	cuMemcpyHtoD(cptr_uvs      , model->uv.data() , numVertices *  8);
 	
 	cuMemAlloc(&cptr_texture   , 4 * 1024 * 1024);
-	cuMemcpyHtoD(cptr_texture, texture.data(), 4 * 1024 * 1024);
+	cuMemcpyHtoD(cptr_texture, texture, 4 * 1024 * 1024);
 
 	cuda_program = new CudaModularProgram({
 		.modules = {
@@ -333,20 +338,41 @@ int main(){
 
 	initCuda();
 
+	// load spot
+	int texWidth, texHeight, numChannels;
+	unsigned char *colors = stbi_load("./resources/spot/spot_texture.png", &texWidth, &texHeight, &numChannels, 4);
 	model = ObjLoader::load("./resources/spot/spot_triangulated.obj");
-	auto ppmdata = readBinaryFile("./resources/spot/spot_texture.ppm", 40, 1000000000000);
-	vector<uint32_t> colors(1024 * 1024, 0);
 
-	for(int i = 0; i < 1024 * 1024; i++){
-		uint32_t r = ppmdata->get<uint8_t>(3 * i + 0);
-		uint32_t g = ppmdata->get<uint8_t>(3 * i + 1);
-		uint32_t b = ppmdata->get<uint8_t>(3 * i + 2);
-		uint32_t color = r | (g << 8) | (b << 16);
+	{ // load skybox
+		// - box with 6 textures, each the same size
+		// nx, ny, nz, px, py, pz
+		int width;
+		int height;
+		int numChannels;
+		
+		vector<unsigned char*> data(6, nullptr);
+		data[0] = stbi_load("./resources/skybox2/nx.jpg", &width, &height, &numChannels, 4);
+		data[1] = stbi_load("./resources/skybox2/ny.jpg", &width, &height, &numChannels, 4);
+		data[2] = stbi_load("./resources/skybox2/nz.jpg", &width, &height, &numChannels, 4);
+		data[3] = stbi_load("./resources/skybox2/px.jpg", &width, &height, &numChannels, 4);
+		data[4] = stbi_load("./resources/skybox2/py.jpg", &width, &height, &numChannels, 4);
+		data[5] = stbi_load("./resources/skybox2/pz.jpg", &width, &height, &numChannels, 4);
 
-		colors[i] = color;
+		for(int i = 0; i < 6; i++){
+			CUdeviceptr cptr;
+			cuMemAlloc(&cptr, width * height * 4);
+			cuMemcpyHtoD(cptr, data[i], width * height * 4);
+			memcpy(&skybox.textures[i], &cptr, sizeof(CUdeviceptr));
+			stbi_image_free(data[i]);
+		}
+
+		skybox.width = width;
+		skybox.height = height;
 	}
 
+
 	initCudaProgram(renderer, model, colors);
+	stbi_image_free(colors);
 
 
 	auto update = [&](){

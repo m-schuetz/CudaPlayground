@@ -297,3 +297,9 @@ struct Uniforms{
 
 
 };
+
+struct Skybox{
+	int width;
+	int height;
+	uint8_t* textures[6];
+};

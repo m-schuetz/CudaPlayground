@@ -39,6 +39,29 @@ void processRange(int first, int size, Function&& f){
 	}
 }
 
+// calls function <f> <size> times
+// calls are distributed over all available threads
+template<typename Function>
+void processRange(int size, Function&& f){
+
+	uint32_t totalThreadCount = blockDim.x * gridDim.x;
+	
+	int itemsPerThread = size / totalThreadCount + 1;
+
+	for(int i = 0; i < itemsPerThread; i++){
+		int block_offset  = itemsPerThread * blockIdx.x * blockDim.x;
+		int thread_offset = itemsPerThread * threadIdx.x;
+		int index = block_offset + thread_offset + i;
+
+		if(index >= size){
+			break;
+		}
+
+		f(index);
+	}
+}
+
+
 void printNumber(int64_t number, int leftPad = 0);
 
 struct Allocator{
