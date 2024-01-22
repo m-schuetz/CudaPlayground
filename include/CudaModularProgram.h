@@ -104,6 +104,9 @@ struct CudaModule{
 
 };
 
+struct OptionalLaunchSettings{
+	bool measureDuration = false;
+};
 
 struct CudaModularProgram{
 
@@ -127,6 +130,9 @@ struct CudaModularProgram{
 
 	vector<string> kernelNames;
 	unordered_map<string, CUfunction> kernels;
+	unordered_map<string, CUevent> events_launch_start;
+	unordered_map<string, CUevent> events_launch_end;
+	unordered_map<string, float> last_launch_duration;
 
 
 	CudaModularProgram(CudaModularProgramArgs args){
@@ -224,13 +230,30 @@ struct CudaModularProgram{
 		cu_checked(cuModuleLoadData(&mod, cubin));
 		//cu_checked(cuModuleGetFunction(&kernel, mod, "kernel"));
 
+		CUdevice device;
+		int numSMs;
+		cuCtxGetDevice(&device);
+		cuDeviceGetAttribute(&numSMs, CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, device);
+
 		for(string kernelName : kernelNames){
 			CUfunction kernel;
 			cu_checked(cuModuleGetFunction(&kernel, mod, kernelName.c_str()));
 
-			kernels[kernelName] = kernel;
-		}
+			for(int blockSize : {64, 128, 256, 512}){
+				int numBlocks;
+				cuOccupancyMaxActiveBlocksPerMultiprocessor(&numBlocks, kernel, blockSize, 0);
 
+				printf("[%s] max active blocks per SM for blocksize %4i: %2i \n", kernelName.c_str(), blockSize, numBlocks);
+			}
+
+			kernels[kernelName] = kernel;
+
+			CUevent event_start, event_end;
+			cuEventCreate(&event_start, 0);
+			cuEventCreate(&event_end, 0);
+			events_launch_start[kernelName] = event_start;
+			events_launch_end[kernelName] = event_end;
+		}
 		for(auto& callback : compileCallbacks){
 			callback();
 		}
@@ -241,6 +264,51 @@ struct CudaModularProgram{
 
 	void onCompile(std::function<void(void)> callback){
 		compileCallbacks.push_back(callback);
+	}
+
+	void launch(string kernelName, void* args[], OptionalLaunchSettings launchArgs = {}){
+
+		CUevent event_start = events_launch_start[kernelName];
+		CUevent event_end   = events_launch_end[kernelName];
+
+		cuEventRecord(event_start, 0);
+
+		CUdevice device;
+		int numSMs;
+		cuCtxGetDevice(&device);
+		cuDeviceGetAttribute(&numSMs, CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, device);
+
+		int blockSize = 128;
+		int numBlocks;
+		CUresult resultcode = cuOccupancyMaxActiveBlocksPerMultiprocessor(&numBlocks, kernels["kernel"], blockSize, 0);
+		numBlocks *= numSMs;
+		
+		//numGroups = 100;
+		// make sure at least 10 workgroups are spawned)
+		numBlocks = std::clamp(numBlocks, 10, 100'000);
+
+		auto kernel = this->kernels[kernelName];
+		auto res_launch = cuLaunchCooperativeKernel(kernel,
+			numBlocks, 1, 1,
+			blockSize, 1, 1,
+			0, 0, args);
+
+		if(res_launch != CUDA_SUCCESS){
+			const char* str; 
+			cuGetErrorString(res_launch, &str);
+			printf("error: %s \n", str);
+		}
+
+		cuEventRecord(event_end, 0);
+
+		if(launchArgs.measureDuration){
+			cuCtxSynchronize();
+
+			float duration;
+			cuEventElapsedTime(&duration, event_start, event_end);
+
+			last_launch_duration[kernelName] = duration;
+		}
 	}
 
 };

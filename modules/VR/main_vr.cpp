@@ -31,6 +31,16 @@ CUdeviceptr cptr_buffer;
 CUdeviceptr cptr_positions, cptr_uvs, cptr_colors;
 CUdeviceptr cptr_texture;
 
+struct CuFramebuffer{
+	CUdeviceptr cptr = 0;
+	int width  = 0;
+	int height = 0;
+};
+
+CuFramebuffer framebuffer;
+CuFramebuffer fb_vr_left;
+CuFramebuffer fb_vr_right;
+
 Skybox skybox;
 
 View viewLeft;
@@ -49,6 +59,10 @@ int sampleMode = SAMPLEMODE_LINEAR;
 bool vrEnabled = false;
 OpenVRHelper* ovr = nullptr;
 
+struct{
+	bool measureLaunchDurations = false;
+} settings;
+
 void initCuda(){
 	cuInit(0);
 	CUdevice cuDevice;
@@ -57,65 +71,7 @@ void initCuda(){
 	cuCtxCreate(&context, 0, cuDevice);
 }
 
-void renderCUDA(shared_ptr<GLRenderer> renderer){
-
-	cuGraphicsGLRegisterImage(
-		&cugl_main, 
-		renderer->view.framebuffer->colorAttachments[0]->handle, 
-		GL_TEXTURE_2D, CU_GRAPHICS_REGISTER_FLAGS_WRITE_DISCARD);
-
-	cuGraphicsGLRegisterImage(
-		&cugl_vr_left, 
-		viewLeft.framebuffer->colorAttachments[0]->handle, 
-		GL_TEXTURE_2D, CU_GRAPHICS_REGISTER_FLAGS_WRITE_DISCARD);
-
-	cuGraphicsGLRegisterImage(
-		&cugl_vr_right, 
-		viewRight.framebuffer->colorAttachments[0]->handle, 
-		GL_TEXTURE_2D, CU_GRAPHICS_REGISTER_FLAGS_WRITE_DISCARD);
-
-	CUresult resultcode = CUDA_SUCCESS;
-
-	CUdevice device;
-	int numSMs;
-	cuCtxGetDevice(&device);
-	cuDeviceGetAttribute(&numSMs, CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, device);
-
-	int workgroupSize = 128;
-
-	int numGroups;
-	resultcode = cuOccupancyMaxActiveBlocksPerMultiprocessor(&numGroups, cuda_program->kernels["kernel"], workgroupSize, 0);
-	numGroups *= numSMs;
-	
-	//numGroups = 100;
-	// make sure at least 10 workgroups are spawned)
-	numGroups = std::clamp(numGroups, 10, 100'000);
-
-	vector<CUgraphicsResource> dynamic_resources = {cugl_main, cugl_vr_left, cugl_vr_right};
-	cuGraphicsMapResources(dynamic_resources.size(), dynamic_resources.data(), ((CUstream)CU_STREAM_DEFAULT));
-
-	CUDA_RESOURCE_DESC res_desc_main = {};
-	res_desc_main.resType = CUresourcetype::CU_RESOURCE_TYPE_ARRAY;
-	cuGraphicsSubResourceGetMappedArray(&res_desc_main.res.array.hArray, cugl_main, 0, 0);
-	CUsurfObject output_main;
-	cuSurfObjectCreate(&output_main, &res_desc_main);
-
-	CUDA_RESOURCE_DESC res_desc_vr_left = {};
-	res_desc_vr_left.resType = CUresourcetype::CU_RESOURCE_TYPE_ARRAY;
-	cuGraphicsSubResourceGetMappedArray(&res_desc_vr_left.res.array.hArray, cugl_vr_left, 0, 0);
-	CUsurfObject output_vr_left;
-	cuSurfObjectCreate(&output_vr_left, &res_desc_vr_left);
-
-	CUDA_RESOURCE_DESC res_desc_vr_right = {};
-	res_desc_vr_right.resType = CUresourcetype::CU_RESOURCE_TYPE_ARRAY;
-	cuGraphicsSubResourceGetMappedArray(&res_desc_vr_right.res.array.hArray, cugl_vr_right, 0, 0);
-	CUsurfObject output_vr_right;
-	cuSurfObjectCreate(&output_vr_right, &res_desc_vr_right);
-
-	cuEventRecord(cevent_start, 0);
-
-	float time = now();
-
+Uniforms getUniforms(shared_ptr<GLRenderer> renderer){
 	Uniforms uniforms;
 	uniforms.width = renderer->width;
 	uniforms.height = renderer->height;
@@ -230,35 +186,91 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 		}
 	}
 
+	return uniforms;
+}
+
+void resizeFramebuffer(CuFramebuffer& framebuffer, int width, int height){
+
+	bool sizeChanged = width != framebuffer.width || height != framebuffer.height;
+
+	if(sizeChanged){
+		if(framebuffer.cptr != 0){
+			cuMemFree(framebuffer.cptr);
+		}
+
+		framebuffer.width  = width;
+		framebuffer.height = height;
+
+		cuMemAlloc(&framebuffer.cptr, width * height * 8);
+	}
+
+}
+
+void renderCUDA(shared_ptr<GLRenderer> renderer){
+
+	resizeFramebuffer(framebuffer, renderer->width, renderer->height);
+	resizeFramebuffer(fb_vr_left, viewLeft.framebuffer->width, viewLeft.framebuffer->height);
+	resizeFramebuffer(fb_vr_right, viewRight.framebuffer->width, viewRight.framebuffer->height);
+
+	cuGraphicsGLRegisterImage(
+		&cugl_main, 
+		renderer->view.framebuffer->colorAttachments[0]->handle, 
+		GL_TEXTURE_2D, CU_GRAPHICS_REGISTER_FLAGS_WRITE_DISCARD);
+
+	cuGraphicsGLRegisterImage(
+		&cugl_vr_left, 
+		viewLeft.framebuffer->colorAttachments[0]->handle, 
+		GL_TEXTURE_2D, CU_GRAPHICS_REGISTER_FLAGS_WRITE_DISCARD);
+
+	cuGraphicsGLRegisterImage(
+		&cugl_vr_right, 
+		viewRight.framebuffer->colorAttachments[0]->handle, 
+		GL_TEXTURE_2D, CU_GRAPHICS_REGISTER_FLAGS_WRITE_DISCARD);
+
+	vector<CUgraphicsResource> dynamic_resources = {cugl_main, cugl_vr_left, cugl_vr_right};
+	cuGraphicsMapResources(dynamic_resources.size(), dynamic_resources.data(), ((CUstream)CU_STREAM_DEFAULT));
+
+	CUDA_RESOURCE_DESC res_desc_main = {};
+	res_desc_main.resType = CUresourcetype::CU_RESOURCE_TYPE_ARRAY;
+	cuGraphicsSubResourceGetMappedArray(&res_desc_main.res.array.hArray, cugl_main, 0, 0);
+	CUsurfObject output_main;
+	cuSurfObjectCreate(&output_main, &res_desc_main);
+
+	CUDA_RESOURCE_DESC res_desc_vr_left = {};
+	res_desc_vr_left.resType = CUresourcetype::CU_RESOURCE_TYPE_ARRAY;
+	cuGraphicsSubResourceGetMappedArray(&res_desc_vr_left.res.array.hArray, cugl_vr_left, 0, 0);
+	CUsurfObject output_vr_left;
+	cuSurfObjectCreate(&output_vr_left, &res_desc_vr_left);
+
+	CUDA_RESOURCE_DESC res_desc_vr_right = {};
+	res_desc_vr_right.resType = CUresourcetype::CU_RESOURCE_TYPE_ARRAY;
+	cuGraphicsSubResourceGetMappedArray(&res_desc_vr_right.res.array.hArray, cugl_vr_right, 0, 0);
+	CUsurfObject output_vr_right;
+	cuSurfObjectCreate(&output_vr_right, &res_desc_vr_right);
+
+	cuEventRecord(cevent_start, 0);
+
+	float time = now();
+
+	Uniforms uniforms = getUniforms(renderer);
 
 	void* args[] = {
 		&uniforms, &cptr_buffer, 
 		&output_main, &output_vr_left, &output_vr_right,
+		&framebuffer.cptr, &fb_vr_left.cptr, &fb_vr_right.cptr,
 		&model->numTriangles, &cptr_positions, &cptr_uvs, &cptr_colors,
 		&cptr_texture, &skybox
 	};
 
-	auto res_launch = cuLaunchCooperativeKernel(cuda_program->kernels["kernel"],
-		numGroups, 1, 1,
-		workgroupSize, 1, 1,
-		0, 0, args);
+	OptionalLaunchSettings launchSettings = {
+		.measureDuration = settings.measureLaunchDurations,
+	};
 
-	if(res_launch != CUDA_SUCCESS){
-		const char* str; 
-		cuGetErrorString(res_launch, &str);
-		printf("error: %s \n", str);
-	}
+	cuda_program->launch("kernel", args, launchSettings);
+	cuda_program->launch("kernel_draw_skybox", args, launchSettings);
+	cuda_program->launch("kernel_toOpenGL", args, launchSettings);
 
 	cuEventRecord(cevent_end, 0);
-	// cuEventSynchronize(cevent_end);
-
-	// {
-	// 	float total_ms;
-	// 	cuEventElapsedTime(&total_ms, cevent_start, cevent_end);
-
-	// 	cout << "CUDA durations: " << endl;
-	// 	cout << std::format("total:     {:6.1f} ms", total_ms) << endl;
-	// }
 
 	cuCtxSynchronize();
 
@@ -297,7 +309,11 @@ void initCudaProgram(
 			"./modules/VR/voxelpainter.cu",
 			"./modules/VR/utils.cu",
 		},
-		.kernels = {"kernel"}
+		.kernels = {
+			"kernel", 
+			"kernel_draw_skybox", 
+			"kernel_toOpenGL"
+		}
 	});
 
 	cuEventCreate(&cevent_start, 0);
@@ -447,6 +463,8 @@ int main(){
 
 			ImGui::Begin("Settings");
 
+			ImGui::Checkbox("Measure Kernel Durations", &settings.measureLaunchDurations);
+
 			static int clicked = 0;
 			string str = vrEnabled ? "turn off VR" : "turn on VR";
 			if(ImGui::Button(str.c_str())){
@@ -459,7 +477,20 @@ int main(){
 				}
 			}
 			
-			
+			ImGui::End();
+		}
+
+		{ // STATS WINDOW
+			ImGui::SetNextWindowSize(ImVec2(490, 230));
+
+			ImGui::Begin("Stats");
+
+			for(string kernelName : cuda_program->kernelNames){
+				float duration = cuda_program->last_launch_duration[kernelName];
+				string msg = std::format("{}: {:.3f} ms", kernelName, duration);
+				ImGui::Text(msg.c_str());
+			}
+
 
 			ImGui::End();
 		}

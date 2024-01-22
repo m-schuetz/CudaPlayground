@@ -129,3 +129,9 @@ struct Allocator{
 	}
 
 };
+
+inline void clearBuffer_u64(uint64_t* buffer, uint64_t value, uint64_t numValues){
+	processRange(numValues, [&](int index){
+		buffer[index] = value;
+	});
+}
