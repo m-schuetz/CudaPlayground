@@ -106,6 +106,11 @@ constexpr int MODEL_GLYPH                  = 4;
 constexpr int JOHIS_HEART                  = 5;
 constexpr int SPHEREHOG                    = 6;
 
+constexpr int PATCHES_CAPACITY = 100'000;
+constexpr int PATCH_RESOLUTION = 32; // n x n points per node
+constexpr int POINTS_PER_PATCH = PATCH_RESOLUTION * PATCH_RESOLUTION;
+constexpr int POINTS_CAPACITY = PATCHES_CAPACITY * POINTS_PER_PATCH;
+
 struct Uniforms{
 	float width;
 	float height;
@@ -126,6 +131,7 @@ struct Uniforms{
 	bool lockFrustum;
 	int  cullingMode;
 	int  showHeatmap;
+	int frameCount;
 };
 
 struct Stats{
@@ -138,37 +144,39 @@ struct Stats{
 	int numPatches[30]                  = {0};
 };
 
-// // s, t in range 0 to 1!
-// auto sampleSphere = [](float s, float t){
+struct Point{
+	float3 pos;
+	float3 normal;
+	union{
+		uint32_t color;
+		uint8_t rgba[4];
+	};
+};
 
-// 	float u = 2.0 * 3.14 * s;
-// 	float v = 3.14 * t;
-	
-// 	float3 xyz = {
-// 		cos(u) * sin(v),
-// 		sin(u) * sin(v),
-// 		cos(v)
-// 	};
+struct Patch{
+	Patch* parent;
+	Patch* children[4];
+	uint32_t numPoints;
+	float2 st_min;
+	float2 st_max;
+	float3 min;
+	float3 max;
+	int modelID;
+	Point points[POINTS_PER_PATCH];
 
-// 	return xyz;
-// };
+	bool isLeaf(){
+		if(children[0] != nullptr) return false;
+		if(children[1] != nullptr) return false;
+		if(children[2] != nullptr) return false;
+		if(children[3] != nullptr) return false;
 
-// // s, t in range 0 to 1!
-// auto samplePlane = [](float s, float t){
-// 	return float3{s, 0.0, t};
-// };
+		return true;
+	}
+};
 
-// auto sampleSinCos = [](float s, float t){
+struct PatchPool{
+	uint32_t capacity;
+	uint32_t offset;
+	Patch* pointers[PATCHES_CAPACITY];
+};
 
-// 	float scale = 10.0;
-// 	float height = 0.105;
-
-// 	return float3{
-// 		10.0f * s, 
-// 		10.0f * height * sin(scale * s) * cos(scale * t), 
-// 		10.0f * t
-// 	};
-// };
-
-// // sampleSinCos, samplePlane, sampleSphere;
-// auto sample = sampleSinCos;

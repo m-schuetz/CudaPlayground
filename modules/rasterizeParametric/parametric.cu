@@ -36,14 +36,6 @@ struct Model{
 	float3 position;
 };
 
-struct Patch{
-	float s_min;
-	float s_max;
-	float t_min;
-	float t_max;
-	int modelID;
-};
-
 float4 operator*(const mat4& a, const float4& b){
 	return make_float4(
 		dot(a.rows[0], b),
@@ -100,6 +92,37 @@ void drawPoint(float4 coord, uint64_t* framebuffer, uint64_t* heatmap,  uint32_t
 }
 
 void drawSprite(float4 coord, uint64_t* framebuffer, uint64_t* heatmap,  uint32_t color, Uniforms& uniforms){
+
+	int x = coord.x;
+	int y = coord.y;
+
+	if(x > 1 && x < uniforms.width  - 2.0f)
+	if(y > 1 && y < uniforms.height - 2.0f){
+
+		// POINT SPRITE
+		for(int ox : {-2, -1, 0, 1, 2})
+		for(int oy : {-2, -1, 0, 1, 2}){
+			uint32_t pixelID = (x + ox) + int(uniforms.width) * (y + oy);
+			uint64_t udepth = *((uint32_t*)&coord.w);
+			uint64_t encoded = (udepth << 32) | color;
+
+			atomicMin(&framebuffer[pixelID], encoded);
+		}
+	}
+}
+
+void drawSprite_w(float3 pos, uint64_t* framebuffer, uint64_t* heatmap,  uint32_t color, Uniforms& uniforms){
+
+	float4 ndc = uniforms.transform * float4{pos.x, pos.y, pos.z, 1.0f};
+	ndc.x = ndc.x / ndc.w;
+	ndc.y = ndc.y / ndc.w;
+	ndc.z = ndc.z / ndc.w;
+
+	float4 coord = float4{
+		(ndc.x * 0.5f + 0.5f) * uniforms.width,
+		(ndc.y * 0.5f + 0.5f) * uniforms.height,
+		ndc.z, ndc.w
+	};
 
 	int x = coord.x;
 	int y = coord.y;
@@ -405,10 +428,10 @@ float3 sampleGlyph(float s, float t){
 			// coeffScale = abs(coeffScale); // TODO: not sure if needed
 
 			// static
-			// f += sh_coefficients[weightIndex++] * coeffScale;
+			f += sh_coefficients[weightIndex++] * coeffScale;
 
 			// animated
-			f += sin(float(0.02f * uniforms.time * weightIndex)) * sh_coefficients[weightIndex++] * coeffScale;
+			// f += sin(float(0.02f * uniforms.time * weightIndex)) * sh_coefficients[weightIndex++] * coeffScale;
 		}
 	}
 	// |                                                                                                    Option C END |
@@ -508,522 +531,191 @@ auto getSampler(int model){
 	}
 };
 
-void generatePatches2(
-	Model* models, uint32_t* numModels, 
-	Patch* patches, uint32_t* numPatches, 
-	int threshold, 
-	const Uniforms& uniforms, 
-	Stats* stats
-){
-
-	auto grid = cg::this_grid();
-
-	if(grid.thread_rank() < 30){
-		stats->numPatches[grid.thread_rank()] = 0;
-	}
-	
-	Patch* patches_tmp_0 = allocator->alloc<Patch*>(MAX_PATCHES * sizeof(Patch));
-	Patch* patches_tmp_1 = allocator->alloc<Patch*>(MAX_PATCHES * sizeof(Patch));
-	uint32_t* numPatches_tmp_0 = allocator->alloc<uint32_t*>(4);
-	uint32_t* numPatches_tmp_1 = allocator->alloc<uint32_t*>(4);
-
-	struct PatchData{
-		Patch* patch;
-		uint32_t* counter;
-	};
-
-	PatchData* pingpong = allocator->alloc<PatchData*>(2 * sizeof(PatchData));
-	pingpong[0] = {patches_tmp_0, numPatches_tmp_0};
-	pingpong[1] = {patches_tmp_1, numPatches_tmp_1};
-
-	if(grid.thread_rank() == 0){
-		*numPatches_tmp_0 = 0;
-		*numPatches_tmp_1 = 0;
-	}
-
-	grid.sync();
-
-	// Create initial set of patches => divide whatever uv-parametric function we have into 8x8 tiles, then refine:
-	constexpr int initialPatchGridSize = 8;
-
-	for(int modelID = 0; modelID < *numModels; modelID++){
-		if(grid.thread_rank() < initialPatchGridSize * initialPatchGridSize){
-
-			int index = grid.thread_rank();
-			int ix = index % initialPatchGridSize;
-			int iy = index / initialPatchGridSize;
-
-			float s_min = float(ix + 0) / float(initialPatchGridSize);
-			float s_max = float(ix + 1) / float(initialPatchGridSize);
-			float t_min = float(iy + 0) / float(initialPatchGridSize);
-			float t_max = float(iy + 1) / float(initialPatchGridSize);
-
-			Patch patch = {s_min, s_max, t_min, t_max, modelID};
-
-			patches_tmp_0[modelID * initialPatchGridSize * initialPatchGridSize + index] = patch;
-		}
-	}
-
-	*numPatches_tmp_0 = *numModels * initialPatchGridSize * initialPatchGridSize;
-
-	grid.sync();
-
-	int level = 0;
-
-	// SUBDIVIDE LARGE PATCHES
-	// - if too large, divide and store in target
-	// - if not too large, store in <patches>
-	// - too large as in pixel size
-	auto subdivide = [&](Patch* source, uint32_t* sourceCounter, Patch* target, uint32_t* targetCounter){
-
-		processRange(*sourceCounter, [&](int index){
-			Patch patch = source[index];
-
-			float s_c = (patch.s_min + patch.s_max) * 0.5f;
-			float t_c = (patch.t_min + patch.t_max) * 0.5f;
-
-			Model model = models[patch.modelID];
-			auto sample = getSampler(model.functionID);
-
-			float3 p_00 = sample(patch.s_min, patch.t_min) + model.position;
-			float3 p_01 = sample(patch.s_min, patch.t_max) + model.position;
-			float3 p_10 = sample(patch.s_max, patch.t_min) + model.position;
-			float3 p_11 = sample(patch.s_max, patch.t_max) + model.position;
-			float3 p_c = sample(s_c, t_c) + model.position;
-
-
-			float3 nodeMin = {
-				min(min(min(p_00.x, p_01.x), min(p_10.x, p_11.x)), p_c.x),
-				min(min(min(p_00.y, p_01.y), min(p_10.y, p_11.y)), p_c.y),
-				min(min(min(p_00.z, p_01.z), min(p_10.z, p_11.z)), p_c.z),
-			};
-			float3 nodeMax = {
-				max(max(max(p_00.x, p_01.x), max(p_10.x, p_11.x)), p_c.x),
-				max(max(max(p_00.y, p_01.y), max(p_10.y, p_11.y)), p_c.y),
-				max(max(max(p_00.z, p_01.z), max(p_10.z, p_11.z)), p_c.z),
-			};
-			bool isIntersectingFrustum = intersectsFrustum(uniforms.locked_transform, nodeMin, nodeMax);
-
-			if(!isIntersectingFrustum){
-				return;
-			}
-
-			float4 ps_00 = toScreen_locked(p_00, uniforms);
-			float4 ps_01 = toScreen_locked(p_01, uniforms);
-			float4 ps_10 = toScreen_locked(p_10, uniforms);
-			float4 ps_11 = toScreen_locked(p_11, uniforms);
-			float4 ps_c = toScreen_locked(p_c, uniforms);
-
-			float min_x = min(min(min(ps_00.x, ps_01.x), min(ps_10.x, ps_11.x)), ps_c.x);
-			float min_y = min(min(min(ps_00.y, ps_01.y), min(ps_10.y, ps_11.y)), ps_c.y);
-			float max_x = max(max(max(ps_00.x, ps_01.x), max(ps_10.x, ps_11.x)), ps_c.x);
-			float max_y = max(max(max(ps_00.y, ps_01.y), max(ps_10.y, ps_11.y)), ps_c.y);
-
-			float s_x = max_x - min_x;
-			float s_y = max_y - min_y;
-			float area = s_x * s_y;
-
-			if(area > threshold * threshold){
-				// too large, subdivide into 4 smaller patches
-
-				uint32_t targetIndex = atomicAdd(targetCounter, 4);
-
-				if(targetIndex >= MAX_PATCHES) return;
-
-				float s_center = (patch.s_min + patch.s_max) / 2.0f;
-				float t_center = (patch.t_min + patch.t_max) / 2.0f;
-
-				Patch patch_00 = {patch.s_min, s_center, patch.t_min, t_center, patch.modelID};
-				Patch patch_01 = {patch.s_min, s_center, t_center, patch.t_max, patch.modelID};
-				Patch patch_10 = {s_center, patch.s_max, patch.t_min, t_center, patch.modelID};
-				Patch patch_11 = {s_center, patch.s_max, t_center, patch.t_max, patch.modelID};
-
-				target[targetIndex + 0] = patch_00;
-				target[targetIndex + 1] = patch_01;
-				target[targetIndex + 2] = patch_10;
-				target[targetIndex + 3] = patch_11;
-
-			}else{
-				// small enough, add to list of patches
-
-				// TODO: do backface culling here? 
-				// If the patch faces away from the camera, ignore it. 
-
-				if (uniforms.cullingMode > 0) {
-					float3 v_00 = make_float3(uniforms.view * uniforms.world * float4{p_00.x, p_00.y, p_00.z, 1.0f});
-					float3 v_01 = make_float3(uniforms.view * uniforms.world * float4{p_01.x, p_01.y, p_01.z, 1.0f});
-					float3 v_10 = make_float3(uniforms.view * uniforms.world * float4{p_10.x, p_10.y, p_10.z, 1.0f});
-					float3 t_01 = v_01 - v_00;
-					float3 t_10 = v_10 - v_00;
-					float3 v_n = normalize(cross(t_01, t_10));
-					constexpr float THRESHOLD = 0.4; // not 0 because displacement could make parts of the patch visible if it is nearly parallel to viewing direction
-					if (uniforms.cullingMode == 2) {
-						v_n = -v_n;
-					}
-					if (dot(v_n, v_00) > THRESHOLD && dot(v_n, v_01) > THRESHOLD && dot(v_n, v_10) > THRESHOLD) return;
-				}
-
-				uint32_t targetIndex = atomicAdd(numPatches, 1);
-
-				if(targetIndex >= MAX_PATCHES) return;
-
-				patches[targetIndex] = patch;
-
-				atomicAdd(&stats->numPatches[level], 1);
-			}
-
-		});
-	};
-
-	grid.sync();
-
-	// DIVIDE IN PING-PONG FASHION
-	for(int i = 0; i < 14; i++){
-
-		grid.sync();
-
-		int sourceIndex = (i + 0) % 2;
-		int targetIndex = (i + 1) % 2;
-
-		PatchData source = pingpong[sourceIndex];
-		PatchData target = pingpong[targetIndex];
-
-		*target.counter = 0;
-
-		grid.sync();
-
-		subdivide(source.patch, source.counter, target.patch, target.counter);
-
-		grid.sync();
-
-		*target.counter = min(*target.counter, MAX_PATCHES);
-		*numPatches = min(*numPatches, MAX_PATCHES);
-
-		level++;
-	}
-
-}
-
-// Rasterize a patch by sampling a 32x32 grid.
-// - We launch with workgroup-size 1024, i.e., 32x32 threads
-// - Therefore we ca let each thread process one sample of the patch concurrently
-// - However, workgroup threads (unlike warp threads) don't operate simultaneously.
-//      - So in order to compute the normal, we compute samples and store the results in shared memory
-//      - Then we sync the group, and then each thread loads adjacent samples to compute the normal
-void rasterizePatches_32x32(
-	Model* models, uint32_t* numModels,
-	Patch* patches, uint32_t* numPatches, 
-	uint64_t* framebuffer, uint64_t* heatmap,  
-	Uniforms& uniforms,
-	Patch* newPatches, uint32_t* numNewPatches, 
-	bool createNewPatches
-){
-
+void generatePatchSamples(Patch* patch, Model* models){
 	auto grid = cg::this_grid();
 	auto block = cg::this_thread_block();
+	
+	// if(grid.thread_rank() == 0){
+	// 	printf("%i \n", models[patch->modelID].functionID);
+	// }
+	auto sampler = getSampler(MODEL_GLYPH);
+	// auto sampler = getSampler(models[patch->modelID].functionID);
 
-	uint32_t& processedPatches = *allocator->alloc<uint32_t*>(4);
-	if(grid.thread_rank() == 0){
-		processedPatches = 0;
-	}
+	patch->min = {Infinity, Infinity, Infinity};
+	patch->max = {-Infinity, -Infinity, -Infinity};
 
-	__shared__ int sh_patchIndex;
-	__shared__ float sh_samples[1024 * 3];
-	__shared__ int sh_pixelPositions[1024];
-	__shared__ bool sh_NeedsRefinement;
-
+	// cg::this_grid().sync();
 	block.sync();
 
-	int loop_max = 10'000;
-	for(int loop_i = 0; loop_i < loop_max; loop_i++){
+	// if(block.thread_rank() == 0 && uniforms.frameCount % 500 == 0){
+	// 	printf("generate block: %i, %llu \n", grid.block_rank(), patch);
+	// }
 
-		// grab the index of the next unprocessed patch
-		block.sync();
-		if(block.thread_rank() == 0){
-			sh_patchIndex = atomicAdd(&processedPatches, 1);
-			sh_NeedsRefinement = false;
-		}
-		block.sync();
+	for(
+		int index = block.thread_rank();
+		index < POINTS_PER_PATCH;
+		index += block.num_threads()
+	){
+		int x = index % PATCH_RESOLUTION;
+		int y = index / PATCH_RESOLUTION;
 
-		if(sh_patchIndex >= *numPatches) break;
+		float u = float(x) / float(PATCH_RESOLUTION);
+		float v = float(y) / float(PATCH_RESOLUTION);
 
-		Patch patch = patches[sh_patchIndex];
-		Model model = models[patch.modelID];
+		float s = u * (patch->st_max.x - patch->st_min.x) + patch->st_min.x;
+		float t = v * (patch->st_max.y - patch->st_min.y) + patch->st_min.y;
 
-		auto sample = getSampler(model.functionID);
+		Point point;
+		point.pos = sampler(s, t);
+		point.rgba[0] = 255.0 * u;
+		point.rgba[1] = 255.0 * v;
+		point.rgba[2] = 0;
 
-		float s_min = patch.s_min;
-		float s_max = patch.s_max;
-		float t_min = patch.t_min;
-		float t_max = patch.t_max;
-
-		int index_t = block.thread_rank();
-		int index_tx = index_t % 32;
-		int index_ty = index_t / 32;
-
-		float uts = float(index_tx) / 32.0f;
-		float vts = float(index_ty) / 32.0f;
-
-		float s = (1.0f - uts) * s_min + uts * s_max;
-		float t = (1.0f - vts) * t_min + vts * t_max;
-
-		float3 p = sample(s, t) + model.position;
-
-		block.sync();
-
-		// Store samples in shared memory, so that other threads can access them
-		sh_samples[3 * index_t + 0] = p.x;
-		sh_samples[3 * index_t + 1] = p.y;
-		sh_samples[3 * index_t + 2] = p.z;
-
-		block.sync();
-
-		int inx = index_t + (index_tx < 31 ?  1 :  -1);
-		int iny = index_t + (index_ty < 31 ? 32 : -32);
-		int inxy = index_t;
-		if(index_tx < 31) inxy += 1;
-		if(index_ty < 31) inxy += 32;
-
-		// Lead adjacent samples (next-x and next-y) to compute normal
-		float3 pnx = {sh_samples[3 * inx + 0], sh_samples[3 * inx + 1], sh_samples[3 * inx + 2]};
-		float3 pny = {sh_samples[3 * iny + 0], sh_samples[3 * iny + 1], sh_samples[3 * iny + 2]};
-
-		float3 tx = normalize(pnx - p);
-		float3 ty = normalize(pny - p);
-		float3 N = normalize(cross(ty, tx));
-
-		float4 ps = toScreen(p, uniforms);
-
-		// Compute pixel positions and store them in shared memory so that ajdacent threads can access them
-		uint32_t pixelPos; 
-		int16_t* pixelPos_u16 = (int16_t*)&pixelPos;
-		pixelPos_u16[0] = int(ps.x);
-		pixelPos_u16[1] = int(ps.y);
-		sh_pixelPositions[index_t] = pixelPos;
-
-		block.sync();
-
-		// compute pixel distances to next samples in x, y, or both directions
-		uint32_t pp_00 = sh_pixelPositions[index_t];
-		uint32_t pp_10 = sh_pixelPositions[inx];
-		uint32_t pp_01 = sh_pixelPositions[iny];
-		int16_t* pp_00_u16 = (int16_t*)&pp_00;
-		int16_t* pp_10_u16 = (int16_t*)&pp_10;
-		int16_t* pp_01_u16 = (int16_t*)&pp_01;
-
-		// the max distance
-		int d_max_10 = max(abs(pp_10_u16[0] - pp_00_u16[0]), abs(pp_10_u16[1] - pp_00_u16[1]));
-		int d_max_01 = max(abs(pp_01_u16[0] - pp_00_u16[0]), abs(pp_01_u16[1] - pp_00_u16[1]));
-		int d_max = max(d_max_10, d_max_01);
-
-		uint32_t color = 0;
-		// uint32_t color = patch.dbg * 12345678;
-		uint8_t* rgba = (uint8_t*)&color;
-		rgba[0] = 200.0f * N.x;
-		rgba[1] = 200.0f * N.y;
-		rgba[2] = 200.0f * N.z;
-		rgba[3] = 255;
-
-		// mark samples where distances to next samples are >1px
-		if(index_tx < 31 && index_ty < 31)
-		if(d_max > 1){
-			// color = 0x00ff00ff;
-			sh_NeedsRefinement = true;
-		}
-
-		block.sync();
-
-		// if(sh_NeedsRefinement){
-		// 	color = 0x0000ffff;
+		// if(index > 100){
+		// 	point.color = 0x00ff00ff;
 		// }
 
-		if(!createNewPatches){
-			color = 0x000000ff;
-		}
+		// if(index < 32)
+		// if(uniforms.frameCount % 500 == 0)
+		// {
+		// 	printf("[%4i] (%.1f, %.1f, %.1f) - %i \n", index, point.pos.x, point.pos.y, point.pos.z, point.rgba[0]);
+		// 	// printf("%.1f, %.1f, %.1f - %i \n", point.pos.x, point.pos.y, point.pos.z, point.rgba[0]);
+		// }
 
-		// color = (patch.x + 1) * (patch.y + 13) * 1234567;
-
-		// drawSprite(ps, framebuffer, color, uniforms);
-
-		// if(N.x > 10.0)
-		drawPoint(ps, framebuffer, heatmap, color, uniforms);
-
-		block.sync();
-
-		// If pixel distances are too large, create new patches to draw
-		if(createNewPatches)
-		if(sh_NeedsRefinement && block.thread_rank() == 0){
-
-			uint32_t newPatchIndex = atomicAdd(numNewPatches, 4);
-
-			if(newPatchIndex >= MAX_PATCHES){
-				atomicSub(numNewPatches, 4);
-				continue;
-			}
-
-			// marked as volatile to reduce register pressure and allow larger workgroup size
-			volatile float s_center = (patch.s_min + patch.s_max) * 0.5f;
-			volatile float t_center = (patch.t_min + patch.t_max) * 0.5f;
-
-			newPatches[newPatchIndex + 0] = {
-				patch.s_min, s_center,
-				patch.t_min, t_center, 
-				patch.modelID
-			};
-
-			newPatches[newPatchIndex + 1] = {
-				s_center, patch.s_max,
-				patch.t_min, t_center,
-				patch.modelID
-			};
-
-			newPatches[newPatchIndex + 2] = {
-				patch.s_min, s_center,
-				t_center, patch.t_max,
-				patch.modelID
-			};
-
-			newPatches[newPatchIndex + 3] = {
-				s_center, patch.s_max,
-				t_center, patch.t_max,
-				patch.modelID
-			};
-		}
+		atomicMinFloat(&patch->min.x, point.pos.x);
+		atomicMinFloat(&patch->min.y, point.pos.y);
+		atomicMinFloat(&patch->min.z, point.pos.z);
+		atomicMaxFloat(&patch->max.x, point.pos.x);
+		atomicMaxFloat(&patch->max.y, point.pos.y);
+		atomicMaxFloat(&patch->max.z, point.pos.z);
+		
+		patch->points[index] = point;
 	}
-}
-
-// Unlike the 32x32 method, this method draws the patch "line by line".
-// - We launch with 128 threads, which sample atx =threadID / 128.0 and y using the loop counter i. 
-// - No normals yet, but we could probably sample the first 2x128 samples and compute normals, 
-//   and then with each iteration next row of 128 samples and compute normals using previous 128 samples. 
-void rasterizePatches_runnin_thru(
-	Model* models, uint32_t* numModels,
-	Patch* patches, uint32_t* numPatches,
-	uint64_t* framebuffer, uint64_t* heatmap,  
-	Uniforms& uniforms
-){
-
-	auto grid = cg::this_grid();
-	auto block = cg::this_thread_block();
-
-	uint32_t& processedPatches = *allocator->alloc<uint32_t*>(4);
-	if(grid.thread_rank() == 0){
-		processedPatches = 0;
-	}
-
-	__shared__ int sh_patchIndex;
-	__shared__ float sh_samples[1024 * 3];
 
 	block.sync();
 
-	int loop_max = 10'000;
-	for(int loop_i = 0; loop_i < loop_max; loop_i++){
+	// if(block.thread_rank() < 32 && uniforms.frameCount % 500 == 0){
+	// 	Point point = patch->points[block.thread_rank()];
+	// 	printf("[%4i] (%.1f, %.1f, %.1f) - %i \n", block.thread_rank(), point.pos.x, point.pos.y, point.pos.z, point.rgba[0]);
+	// }
 
-		// grab the index of the next unprocessed triangle
-		block.sync();
-		if(block.thread_rank() == 0){
-			sh_patchIndex = atomicAdd(&processedPatches, 1);
-		}
-		block.sync();
 
-		if(sh_patchIndex >= *numPatches) break;
 
-		Patch patch = patches[sh_patchIndex];
-		Model model = models[patch.modelID];
-		auto sample = getSampler(uniforms.model);
 
-		float s_min = patch.s_min;
-		float s_max = patch.s_max;
-		float t_min = patch.t_min;
-		float t_max = patch.t_max;
 
-		int index_t = block.thread_rank();
-		float ut = float(index_t) / float(block.num_threads());
 
-		float s = (1.0f - ut) * s_min + ut * s_max;
-		float t = t_min;
+	// processRange(POINTS_PER_PATCH, [&](int index){
+	// 	int x = index % PATCH_RESOLUTION;
+	// 	int y = index / PATCH_RESOLUTION;
 
+	// 	float u = float(x) / float(PATCH_RESOLUTION);
+	// 	float v = float(y) / float(PATCH_RESOLUTION);
+
+	// 	float s = u * (patch->st_max.x - patch->st_min.x) + patch->st_min.x;
+	// 	float t = v * (patch->st_max.y - patch->st_min.y) + patch->st_min.y;
+
+	// 	Point point;
+	// 	point.pos = sampler(s, t);
+
+	// 	atomicMinFloat(&patch->min.x, point.pos.x);
+	// 	atomicMinFloat(&patch->min.y, point.pos.y);
+	// 	atomicMinFloat(&patch->min.z, point.pos.z);
+	// 	atomicMaxFloat(&patch->max.x, point.pos.x);
+	// 	atomicMaxFloat(&patch->max.y, point.pos.y);
+	// 	atomicMaxFloat(&patch->max.z, point.pos.z);
 		
-		float steps = 64.0f;
-		for(float i = 0.0f; i < steps; i = i + 1.0f){
-			float vt = i / steps;
-			float t = (1.0f - vt) * t_min + vt * t_max;
-
-			float3 p = sample(s, t) + model.position;
-			float3 p_nx = sample(s + 0.0001f, t) + model.position;
-			float3 p_ny = sample(s, t + 0.0001f) + model.position;
-
-			float3 tx = normalize(p_nx - p);
-			float3 ty = normalize(p_ny - p);
-			float3 N = normalize(cross(ty, tx));
-
-			uint32_t color = 0x000000ff;
-			volatile uint8_t* rgba = (uint8_t*)&color;
-
-			float4 ps = toScreen(p, uniforms);
-
-			color = 1234567.0f * (123.0f + patch.s_min * patch.t_min);
-
-			rgba[0] = 200.0f * N.x;
-			rgba[1] = 200.0f * N.y;
-			rgba[2] = 200.0f * N.z;
-			rgba[3] = 255;
-
-			// if(p.x * p.y == 123.0f)
-			drawPoint(ps, framebuffer, heatmap, color, uniforms);
-
-		}
-
-
-		
-
-		block.sync();
-	}
+	// 	patch->points[index] = point;
+	// });
 }
 
 extern "C" __global__
-void kernel_generate_scene(
+void kernel_create_scene(
 	const Uniforms _uniforms,
 	unsigned int* buffer,
+	uint64_t* framebuffer, uint64_t* heatmap,
 	Model* models, uint32_t* numModels,
-	Patch* patches, uint32_t* numPatches,
-	cudaSurfaceObject_t gl_colorbuffer,
+	Patch** patches, uint32_t* numPatches,
+	PatchPool* patchPool, Patch* patchStorage,
 	Stats* stats
 ){
 	auto grid = cg::this_grid();
 	auto block = cg::this_thread_block();
 
+	// if(grid.thread_rank() == 0 && uniforms.frameCount % 500 == 0) 
+	// printf("================ create scene ================ \n");
+
 	uniforms = _uniforms;
 
-	if(grid.thread_rank() == 0){
+	Allocator _allocator(buffer, 0);
+	allocator = &_allocator;
+	
+	patchPool->capacity = PATCHES_CAPACITY;
+	patchPool->offset = 0;
 
-		// models[0] = {0, float3{ 2.1, 0.0, -2.1}};
-		// models[1] = {1, float3{ 0.0, 0.0, -2.1}};
-		// models[2] = {1, float3{-2.1, 0.0, -2.1}};
+	processRange(PATCHES_CAPACITY, [&](int index){
+		patchPool->pointers[index] = &patchStorage[index];
+	});
 
-		// models[3] = {3, float3{ 2.1, 0.0, 0.0}};
-		// models[4] = {4, float3{ 0.0, 0.0, 0.0}};
-		// models[5] = {0, float3{-2.1, 0.0, 0.0}};
+	grid.sync();
 
-		// models[6] = {1, float3{ 2.1, 0.0, 2.1}};
-		// models[7] = {1, float3{ 0.0, 0.0, 2.1}};
-		// models[8] = {3, float3{-2.1, 0.0, 2.1}};
+	if(grid.block_rank() == 0)
+	{ // Root
+		patchPool->offset = 1;
+		uint32_t patchIndex = 0;
+		Patch* root = &patchStorage[patchIndex];
+		root->st_min = {0.0f, 0.0f};
+		root->st_max = {1.0f, 1.0f};
+		root->parent = nullptr;
+		root->children[0] = nullptr;
+		root->children[1] = nullptr;
+		root->children[2] = nullptr;
+		root->children[3] = nullptr;
+		root->modelID = uniforms.model;
+		root->numPoints = POINTS_PER_PATCH;
+		patches[0] = root;
 
-		// *numModels = 9;
-
-		models[0] = {uniforms.model, float3{ 0.0, 0.0, 0.0}};
-
-		*numModels = 1;
+		generatePatchSamples(root, models);
 	}
 
+	// {
+	// 	uint32_t parentIndex = 0;
+	// 	Patch* parent = &patchStorage[parentIndex];
+
+	// 	uint32_t patchIndex = 1;
+	// 	Patch* patch = &patchStorage[patchIndex];
+	// 	patch->st_min = {0.0f, 0.0f};
+	// 	patch->st_max = {1.0f, 0.5f};
+	// 	patch->parent = parent;
+	// 	patch->children[0] = nullptr;
+	// 	patch->children[1] = nullptr;
+	// 	patch->children[2] = nullptr;
+	// 	patch->children[3] = nullptr;
+	// 	patch->modelID = uniforms.model;
+	// 	patch->numPoints = POINTS_PER_PATCH;
+
+	// 	parent->children[0] = patch;
+
+	// 	patches[1] = patch;
+
+	// 	generatePatchSamples(patch, models);
+	// }
+
+	if(grid.thread_rank() == 0){
+		// patches[0] = patchIndex;
+		*numPatches = 1;
+	}
 }
 
+
+
 extern "C" __global__
-void kernel_generate_patches(
+void kernel_update_patches(
 	const Uniforms _uniforms,
 	unsigned int* buffer,
+	uint64_t* framebuffer, uint64_t* heatmap,
 	Model* models, uint32_t* numModels,
-	Patch* patches, uint32_t* numPatches,
+	Patch** patches, uint32_t* numPatches,
+	PatchPool* patchPool, Patch* patchStorage,
 	cudaSurfaceObject_t gl_colorbuffer,
 	Stats* stats
 ){
@@ -1035,93 +727,424 @@ void kernel_generate_patches(
 	Allocator _allocator(buffer, 0);
 	allocator = &_allocator;
 
+	// return;
+
+	auto min8 = [](float f0, float f1, float f2, float f3, float f4, float f5, float f6, float f7){
+
+		float m0 = min(f0, f1);
+		float m1 = min(f2, f3);
+		float m2 = min(f4, f5);
+		float m3 = min(f6, f7);
+
+		float n0 = min(m0, m1);
+		float n1 = min(m2, m3);
+
+		return min(n0, n1);
+	};
+
+	auto max8 = [](float f0, float f1, float f2, float f3, float f4, float f5, float f6, float f7){
+
+		float m0 = max(f0, f1);
+		float m1 = max(f2, f3);
+		float m2 = max(f4, f5);
+		float m3 = max(f6, f7);
+
+		float n0 = max(m0, m1);
+		float n1 = max(m2, m3);
+
+		return max(n0, n1);
+	};
+
+	int lNumPatches = *numPatches;
+
+	uint32_t* next_numNodes = allocator->alloc<uint32_t*>(4);
+	Patch** next_patches = allocator->alloc<Patch**>(PATCHES_CAPACITY * sizeof(Patch**));
+
+	uint32_t* numNeedDeletion = allocator->alloc<uint32_t*>(4);
+	Patch** needDeletion = allocator->alloc<Patch**>(PATCHES_CAPACITY * sizeof(Patch**));
+
+	uint32_t* numNeedExpansion = allocator->alloc<uint32_t*>(4);
+	Patch** needExpansion = allocator->alloc<Patch**>(PATCHES_CAPACITY * sizeof(Patch**));
+
+	*next_numNodes = 0;
+	*numNeedDeletion = 0;
+	*numNeedExpansion = 0;
+
 	grid.sync();
-	if(grid.thread_rank() == 0){
-		*numPatches = 0;
-	}
-	grid.sync();
 
-	int threshold = 32;
-	if(uniforms.method == METHOD_32X32){
-		threshold = 32;
-	}else if(uniforms.method == METHOD_RUNNIN_THRU){
-		threshold = 64;
-	}
+	processRange(lNumPatches, [&](int patchIndex){
 
-	generatePatches2(models, numModels, patches, numPatches, threshold, uniforms, stats);
+		Patch* patch = patches[patchIndex];
+
+		// - check bounding box
+		// - if too big, create 4 smaller patches
+		// - if too small, delete children
+
+		float4 p000 = {patch->min.x, patch->min.y, patch->min.z, 1.0f};
+		float4 p001 = {patch->min.x, patch->min.y, patch->max.z, 1.0f};
+		float4 p010 = {patch->min.x, patch->max.y, patch->min.z, 1.0f};
+		float4 p011 = {patch->min.x, patch->max.y, patch->max.z, 1.0f};
+		float4 p100 = {patch->max.x, patch->min.y, patch->min.z, 1.0f};
+		float4 p101 = {patch->max.x, patch->min.y, patch->max.z, 1.0f};
+		float4 p110 = {patch->max.x, patch->max.y, patch->min.z, 1.0f};
+		float4 p111 = {patch->max.x, patch->max.y, patch->max.z, 1.0f};
+
+		float4 ndc000 = uniforms.transform * p000;
+		float4 ndc001 = uniforms.transform * p001;
+		float4 ndc010 = uniforms.transform * p010;
+		float4 ndc011 = uniforms.transform * p011;
+		float4 ndc100 = uniforms.transform * p100;
+		float4 ndc101 = uniforms.transform * p101;
+		float4 ndc110 = uniforms.transform * p110;
+		float4 ndc111 = uniforms.transform * p111;
+
+		float4 s000 = ((ndc000 / ndc000.w) * 0.5f + 0.5f) * float4{uniforms.width, uniforms.height, 1.0f, 1.0f};
+		float4 s001 = ((ndc001 / ndc001.w) * 0.5f + 0.5f) * float4{uniforms.width, uniforms.height, 1.0f, 1.0f};
+		float4 s010 = ((ndc010 / ndc010.w) * 0.5f + 0.5f) * float4{uniforms.width, uniforms.height, 1.0f, 1.0f};
+		float4 s011 = ((ndc011 / ndc011.w) * 0.5f + 0.5f) * float4{uniforms.width, uniforms.height, 1.0f, 1.0f};
+		float4 s100 = ((ndc100 / ndc100.w) * 0.5f + 0.5f) * float4{uniforms.width, uniforms.height, 1.0f, 1.0f};
+		float4 s101 = ((ndc101 / ndc101.w) * 0.5f + 0.5f) * float4{uniforms.width, uniforms.height, 1.0f, 1.0f};
+		float4 s110 = ((ndc110 / ndc110.w) * 0.5f + 0.5f) * float4{uniforms.width, uniforms.height, 1.0f, 1.0f};
+		float4 s111 = ((ndc111 / ndc111.w) * 0.5f + 0.5f) * float4{uniforms.width, uniforms.height, 1.0f, 1.0f};
+
+		float smin_x = min8(s000.x, s001.x, s010.x, s011.x, s100.x, s101.x, s110.x, s111.x);
+		float smin_y = min8(s000.y, s001.y, s010.y, s011.y, s100.y, s101.y, s110.y, s111.y);
+
+		float smax_x = max8(s000.x, s001.x, s010.x, s011.x, s100.x, s101.x, s110.x, s111.x);
+		float smax_y = max8(s000.y, s001.y, s010.y, s011.y, s100.y, s101.y, s110.y, s111.y);
+
+		// screen-space size
+		float dx = smax_x - smin_x;
+		float dy = smax_y - smin_y;
+
+		float pixels = dx * dy;
 
 
-}
+		// drawSprite_w(float3{patch->min.x, patch->min.y, patch->min.z}, framebuffer, heatmap, 0x00ff00ff, uniforms);
+		// drawSprite_w(float3{patch->min.x, patch->min.y, patch->max.z}, framebuffer, heatmap, 0x00ff00ff, uniforms);
+		// drawSprite_w(float3{patch->min.x, patch->max.y, patch->min.z}, framebuffer, heatmap, 0x00ff00ff, uniforms);
+		// drawSprite_w(float3{patch->min.x, patch->max.y, patch->max.z}, framebuffer, heatmap, 0x00ff00ff, uniforms);
+		// drawSprite_w(float3{patch->max.x, patch->min.y, patch->min.z}, framebuffer, heatmap, 0x00ff00ff, uniforms);
+		// drawSprite_w(float3{patch->max.x, patch->min.y, patch->max.z}, framebuffer, heatmap, 0x00ff00ff, uniforms);
+		// drawSprite_w(float3{patch->max.x, patch->max.y, patch->min.z}, framebuffer, heatmap, 0x00ff00ff, uniforms);
+		// drawSprite_w(float3{patch->max.x, patch->max.y, patch->max.z}, framebuffer, heatmap, 0x00ff00ff, uniforms);
 
-// Compute a whole lot of samples to check how many we can compute in a given time
-// - We don't write the results to screen because that takes time, but we need to 
-//   act as if we do so that the compiler doesn't optimize sample generation away.
-// - Simply do some if that virtually never evaluates to true, and draw only if it's true. 
-extern "C" __global__
-void kernel_sampleperf_test(
-	const Uniforms _uniforms,
-	unsigned int* buffer,
-	uint64_t* framebuffer, uint64_t* heatmap, 
-	Model* models, uint32_t* numModels,
-	Patch* patches, uint32_t* numPatches,
-	cudaSurfaceObject_t gl_colorbuffer,
-	Stats* stats
-){
-	auto grid = cg::this_grid();
-	auto block = cg::this_thread_block();
+		// printf("%.1f, %.1f, %.1f \n", patch->min.x, patch->min.y, patch->min.z);
+		// printf("dx: %.1f, dy: %.1f \n", dx, dy);
+		// printf("%.1f pixels \n", pixels);
 
-	uniforms = _uniforms;
+		constexpr int LARGE_PATCH_THRESHOLD = 64 * 64; // need to generate new nodes
+		constexpr int SMALL_PATCH_THRESHOLD = 32 * 32; // need to remove nodes
+		
+		bool isLarge = pixels > LARGE_PATCH_THRESHOLD;
+		bool isSmall = pixels < SMALL_PATCH_THRESHOLD;
 
-	Allocator _allocator(buffer, 0);
-	allocator = &_allocator;
-
-	uint64_t t_00 = nanotime();
-
-	grid.sync();
-
-
-	auto sampler = getSampler(uniforms.model);
-	int gridSize = 10'000; // 100M
-	int numPixels = int(uniforms.width * uniforms.height);
-
-	processRange(gridSize * gridSize, [&](int index){
-
-		uint32_t ix = index % gridSize;
-		uint32_t iy = index / gridSize;
-
-		float s = float(ix) / float(gridSize);
-		float t = float(iy) / float(gridSize);
-
-		float3 sample = sampler(s, t);
-
-		// Some bogus <if> that pretents to do something but virtually never evaluates to true,
-		// so that sampler(...) isn't optimized away.
-		if(sample.x * sample.y == 123.0f){
-			int pixelID = int(sample.x * sample.y * 1234.0f) % numPixels;
-			framebuffer[10'000] = (uint64_t(Infinity) << 32ull) | uint64_t(BACKGROUND_COLOR);
+		if(patch->st_max.x - patch->st_min.x > 0.4){
+			isLarge = true;
 		}
+
+		// if(isLarge && isSmall){
+		// 	isSmall = false;
+		// }
+
+		bool needsExpansion = isLarge && patch->isLeaf();
+		bool needsDeletion = isSmall && patch->isLeaf() && patch->parent != nullptr;
+
+		if(needsExpansion && needsDeletion){
+			printf("shit...");
+			return;
+		}
+
+		if(!needsDeletion){
+			// this patch is visible
+			uint32_t next_index = atomicAdd(next_numNodes, 1);
+			next_patches[next_index] = patch;
+		}
+		
+		if(needsExpansion){
+			// needs expansion - create children
+			uint32_t index = atomicAdd(numNeedExpansion, 1);
+			needExpansion[index] = patch;
+		}else if(needsDeletion && patch == patch->parent->children[0]){
+			uint32_t index = atomicAdd(numNeedDeletion, 1);
+			needDeletion[index] = patch->parent;
+		}
+	});
+
+	grid.sync();
+
+	if(grid.thread_rank() == 0 && *numNeedDeletion > 0) 
+	printf("numNeedExpansion: %i, numNeedDeletion: %i \n", *numNeedExpansion, *numNeedDeletion);
+
+	// if(grid.thread_rank() == 0){
+	// 	printf("%i \n", patchPool->offset);
+	// }
+
+	processRange(*numNeedDeletion, [&](int index){
+		Patch* patch = needDeletion[index];
+
+		int numToDelete = 0;
+		if(patch->children[0] != nullptr) numToDelete++;
+		if(patch->children[1] != nullptr) numToDelete++;
+		if(patch->children[2] != nullptr) numToDelete++;
+		if(patch->children[3] != nullptr) numToDelete++;
+
+		uint32_t poolIndex = atomicSub(&patchPool->offset, numToDelete) - numToDelete;
+
+		printf("deleting patch with %i children. Target pool index is %i \n", numToDelete, poolIndex);
+
+		int numDeleted = 0;
+		for(int i = 0; i < 4; i++){
+
+			Patch* child = patch->children[i];
+
+			if(child == nullptr) continue;
+
+			patch->children[i] = nullptr;
+			patchPool->pointers[poolIndex + numDeleted] = child;
+
+			numDeleted++;
+		}
+
 
 	});
 
 	grid.sync();
 
-	uint64_t t_20 = nanotime();
+	__shared__ int sh_storageIndex;
 
-	// TODO: should do timings in host code with events.
-	if(grid.thread_rank() == 0 && (stats->frameID % 100) == 0){
-		stats->time_0 = float((t_20 - t_00) / 1000llu) / 1000.0f;
-		stats->time_1 = 0.0;
-	}
+	for_blockwise(*numNeedExpansion, [&](int index){
+
+		Patch* parent = needExpansion[index];
+
+		if(block.thread_rank() == 0){
+			uint32_t storageIndex = atomicAdd(&patchPool->offset, 4);
+			sh_storageIndex = storageIndex;
+		}
+
+		block.sync();
+
+
+		float2 min = parent->st_min;
+		float2 max = parent->st_max;
+		float2 ctr = (min + max) * 0.5f;
+
+		{
+			Patch* child = &patchStorage[sh_storageIndex + 0];
+			child->st_min = {min.x, min.y};
+			child->st_max = {ctr.x, ctr.y};
+			child->parent = parent;
+			child->children[0] = nullptr;
+			child->children[1] = nullptr;
+			child->children[2] = nullptr;
+			child->children[3] = nullptr;
+			child->modelID = uniforms.model;
+			child->numPoints = POINTS_PER_PATCH;
+			parent->children[0] = child;
+
+			generatePatchSamples(child, models);
+		}
+
+		{
+			Patch* child = &patchStorage[sh_storageIndex + 1];
+			child->st_min = {ctr.x, min.y};
+			child->st_max = {max.x, ctr.y};
+			child->parent = parent;
+			child->children[0] = nullptr;
+			child->children[1] = nullptr;
+			child->children[2] = nullptr;
+			child->children[3] = nullptr;
+			child->modelID = uniforms.model;
+			child->numPoints = POINTS_PER_PATCH;
+			parent->children[1] = child;
+
+			generatePatchSamples(child, models);
+		}
+
+		{
+			Patch* child = &patchStorage[sh_storageIndex + 2];
+			child->st_min = {min.x, ctr.y};
+			child->st_max = {ctr.x, max.y};
+			child->parent = parent;
+			child->children[0] = nullptr;
+			child->children[1] = nullptr;
+			child->children[2] = nullptr;
+			child->children[3] = nullptr;
+			child->modelID = uniforms.model;
+			child->numPoints = POINTS_PER_PATCH;
+			parent->children[2] = child;
+
+			generatePatchSamples(child, models);
+		}
+
+		{
+			Patch* child = &patchStorage[sh_storageIndex + 3];
+			child->st_min = {ctr.x, ctr.y};
+			child->st_max = {max.x, max.y};
+			child->parent = parent;
+			child->children[0] = nullptr;
+			child->children[1] = nullptr;
+			child->children[2] = nullptr;
+			child->children[3] = nullptr;
+			child->modelID = uniforms.model;
+			child->numPoints = POINTS_PER_PATCH;
+			parent->children[3] = child;
+
+			generatePatchSamples(child, models);
+		}
+
+		block.sync();
+
+		if(block.thread_rank() == 0){
+			uint32_t nextPatchIndex = atomicAdd(next_numNodes, 4);
+
+			next_patches[nextPatchIndex + 0] = parent->children[0];
+			next_patches[nextPatchIndex + 1] = parent->children[1];
+			next_patches[nextPatchIndex + 2] = parent->children[2];
+			next_patches[nextPatchIndex + 3] = parent->children[3];
+		}
+	});
+
+	grid.sync();
+
+	processRange(*next_numNodes, [&](int index){
+		patches[index] = next_patches[index];
+	});
+
+	*numPatches = *next_numNodes;
+
+	// if(grid.thread_rank() == 0){
+	// 	printf("%i \n", *numPatches);
+	// }
 
 }
+
+extern "C" __global__
+void kernel_rasterize(
+	const Uniforms _uniforms,
+	unsigned int* buffer,
+	uint64_t* framebuffer, uint64_t* heatmap,
+	Model* models, uint32_t* numModels,
+	Patch** patches, uint32_t* numPatches,
+	PatchPool* patchPool, Patch* patchStorage,
+	cudaSurfaceObject_t gl_colorbuffer,
+	Stats* stats
+){
+	auto grid = cg::this_grid();
+	auto block = cg::this_thread_block();
+
+	Allocator _allocator(buffer, 0);
+
+	uniforms = _uniforms;
+	allocator = &_allocator;
+
+
+	for_blockwise(*numPatches, [&](int patchIndex){
+
+		// if(patchIndex == 0) return;
+
+		Patch* patch = patches[patchIndex];
+
+		for(
+			uint32_t pointIndex = block.thread_rank();
+			pointIndex < patch->numPoints;
+			pointIndex += block.num_threads()
+		){
+			Point point = patch->points[pointIndex];
+			float3 pos = point.pos;
+
+			float4 ndc = uniforms.transform * float4{pos.x, pos.y, pos.z, 1.0f};
+			ndc.x = ndc.x / ndc.w;
+			ndc.y = ndc.y / ndc.w;
+			ndc.z = ndc.z / ndc.w;
+
+			float4 screenCoord = float4{
+				(ndc.x * 0.5f + 0.5f) * uniforms.width,
+				(ndc.y * 0.5f + 0.5f) * uniforms.height,
+				ndc.z, ndc.w
+			};
+
+			// if(block.thread_rank() == 0 && uniforms.frameCount % 500 == 0){
+			// 	printf("sizeof(Patch): %i \n", sizeof(Patch));
+			// 	// printf("rasterize block: %i, %llu \n", grid.block_rank(), patch);
+			// }
+
+			// if(pointIndex < 32)
+			// if(uniforms.frameCount % 500 == 0)
+			// {
+			// 	printf("[%4i] (%.1f, %.1f, %.1f) - %i \n", pointIndex, point.pos.x, point.pos.y, point.pos.z, point.rgba[0]);
+			// 	// printf("%.1f, %.1f, %.1f - %i \n", point.pos.x, point.pos.y, point.pos.z, point.rgba[0]);
+			// }
+
+			// if(pointIndex == 1){
+			// 	printf("%.1f, %.1f, %.1f - %i \n", point.pos.x, point.pos.y, point.pos.z, point.rgba[0]);
+			// }
+
+			uint32_t color = point.color;
+			drawPoint(screenCoord, framebuffer, heatmap, color, uniforms);
+
+			// break;
+		}
+	});
+
+
+
+	// __shared__ int sh_patchIndex;
+	// uint32_t* numPatchesProcessed = allocator->alloc<uint32_t*>(4);
+	// *numPatchesProcessed = 0;
+
+	// grid.sync();
+
+	// while(true){
+
+	// 	if(block.thread_rank() == 0){
+	// 		uint32_t patchIndex = atomicAdd(numPatchesProcessed, 1);
+	// 		sh_patchIndex = patchIndex;
+	// 	}
+
+	// 	block.sync();
+
+	// 	if(sh_patchIndex >= *numPatches) break;
+
+	// 	Patch* patch = patches[sh_patchIndex];
+
+	// 	for(
+	// 		uint32_t pointIndex = block.thread_rank();
+	// 		pointIndex < patch->numPoints;
+	// 		pointIndex += block.num_threads()
+	// 	){
+	// 		Point point = patch->points[pointIndex];
+	// 		float3 pos = point.pos;
+
+	// 		float4 ndc = uniforms.transform * float4{pos.x, pos.y, pos.z, 1.0f};
+	// 		ndc.x = ndc.x / ndc.w;
+	// 		ndc.y = ndc.y / ndc.w;
+	// 		ndc.z = ndc.z / ndc.w;
+
+	// 		float4 screenCoord = float4{
+	// 			(ndc.x * 0.5f + 0.5f) * uniforms.width,
+	// 			(ndc.y * 0.5f + 0.5f) * uniforms.height,
+	// 			ndc.z, ndc.w
+	// 		};
+
+	// 		uint32_t color = 0x000000ff;
+	// 		drawSprite(screenCoord, framebuffer, heatmap, color, uniforms);
+	// 	}
+
+	// }
+
+
+}
+
 
 extern "C" __global__
 void kernel_clear_framebuffer(
 	const Uniforms _uniforms,
 	unsigned int* buffer,
-	uint64_t* framebuffer, uint64_t* heatmap, 
+	uint64_t* framebuffer, uint64_t* heatmap,
 	Model* models, uint32_t* numModels,
-	Patch* patches, uint32_t* numPatches,
+	Patch** patches, uint32_t* numPatches,
+	PatchPool* patchPool, Patch* patchStorage,
 	cudaSurfaceObject_t gl_colorbuffer,
 	Stats* stats
 ){
@@ -1131,7 +1154,6 @@ void kernel_clear_framebuffer(
 	processRange(0, _uniforms.width * _uniforms.height, [&](int pixelIndex){
 		// framebuffer[pixelIndex] = 0x7f800000'00332211ull;
 		framebuffer[pixelIndex] = (uint64_t(Infinity) << 32ull) | uint64_t(BACKGROUND_COLOR);
-		heatmap[pixelIndex] = 0;
 	});
 
 }
@@ -1155,9 +1177,10 @@ extern "C" __global__
 void kernel_framebuffer_to_OpenGL(
 	const Uniforms _uniforms,
 	unsigned int* buffer,
-	uint64_t* framebuffer, uint64_t* heatmap, 
+	uint64_t* framebuffer, uint64_t* heatmap,
 	Model* models, uint32_t* numModels,
-	Patch* patches, uint32_t* numPatches,
+	Patch** patches, uint32_t* numPatches,
+	PatchPool* patchPool, Patch* patchStorage,
 	cudaSurfaceObject_t gl_colorbuffer,
 	Stats* stats
 ){
@@ -1170,20 +1193,10 @@ void kernel_framebuffer_to_OpenGL(
 		int x = pixelIndex % int(_uniforms.width);
 		int y = pixelIndex / int(_uniforms.width);
 
-		if (_uniforms.showHeatmap > 0) {
-			auto inp = heatmap[pixelIndex];
-			if (_uniforms.showHeatmap >= 6)
-				inp = log2(float(inp));
-			else 
-				inp = inp / _uniforms.showHeatmap;
-			inp = clamp(inp, 0, MAX_HEATMAP_COLORS-1);
-			surf2Dwrite(heatmapColors[inp], gl_colorbuffer, x * 4, y);
-		}
-		else {
-			uint64_t encoded = framebuffer[pixelIndex];
-			uint32_t color = encoded & 0xffffffffull;
-			surf2Dwrite(color, gl_colorbuffer, x * 4, y);
-		}
+		uint64_t encoded = framebuffer[pixelIndex];
+		uint32_t color = encoded & 0xffffffffull;
+		surf2Dwrite(color, gl_colorbuffer, x * 4, y);
+		
 	});
 
 	if(grid.thread_rank() == 0){
@@ -1192,119 +1205,4 @@ void kernel_framebuffer_to_OpenGL(
 
 }
 
-extern "C" __global__
-void kernel_rasterize_patches_32x32(
-	const Uniforms _uniforms,
-	unsigned int* buffer,
-	uint64_t* framebuffer, uint64_t* heatmap, 
-	Model* models, uint32_t* numModels,
-	Patch* patches, uint32_t* numPatches,
-	cudaSurfaceObject_t gl_colorbuffer,
-	Stats* stats
-){
-	auto grid = cg::this_grid();
-	auto block = cg::this_thread_block();
 
-	Allocator _allocator(buffer, 0);
-
-	uniforms = _uniforms;
-	allocator = &_allocator;
-
-	Patch* newPatches = allocator->alloc<Patch*>(MAX_PATCHES * sizeof(Patch));
-	uint32_t* numNewPatches = allocator->alloc<uint32_t*>(4);
-
-	grid.sync();
-
-	if(grid.thread_rank() == 0){
-		*numNewPatches = 0;
-	}
-
-	grid.sync();
-
-	rasterizePatches_32x32(
-		models, numModels,
-		patches, numPatches, 
-		framebuffer, heatmap,
-		uniforms,
-		newPatches, numNewPatches, true
-	);
-	grid.sync();
-
-	if(uniforms.enableRefinement){
-		// the earlier call to rasterizePatches checked for holes and created
-		// a refined list of patches. render them now. 
-		rasterizePatches_32x32(
-			models, numModels,
-			newPatches, numNewPatches, 
-			framebuffer, heatmap,
-			uniforms,
-			patches, numPatches, false
-		);
-		grid.sync();
-	}
-
-	grid.sync();
-
-	
-
-}
-
-extern "C" __global__
-void kernel_rasterize_patches_runnin_thru(
-	const Uniforms _uniforms,
-	unsigned int* buffer,
-	uint64_t* framebuffer, uint64_t* heatmap, 
-	Model* models, uint32_t* numModels,
-	Patch* patches, uint32_t* numPatches,
-	cudaSurfaceObject_t gl_colorbuffer,
-	Stats* stats
-){
-	auto grid = cg::this_grid();
-	auto block = cg::this_thread_block();
-
-	Allocator _allocator(buffer, 0);
-
-	uniforms = _uniforms;
-	allocator = &_allocator;
-
-	grid.sync();
-	rasterizePatches_runnin_thru(models, numModels, patches, numPatches, framebuffer, heatmap, uniforms);
-
-}
-
-// just some debugging. and checking how many registers a simple kernel utilizes.
-extern "C" __global__
-void kernel_test(
-	const Uniforms _uniforms,
-	unsigned int* buffer,
-	Model* models, uint32_t* numModels,
-	Patch* patches, uint32_t* numPatches,
-	cudaSurfaceObject_t gl_colorbuffer,
-	Stats* stats
-){
-	auto grid = cg::this_grid();
-	auto block = cg::this_thread_block();
-
-
-	uint32_t size = uniforms.width * uniforms.height;
-	uint32_t totalThreadCount = blockDim.x * gridDim.x;
-	int itemsPerThread = size / totalThreadCount + 1;
-
-	for(int i = 0; i < itemsPerThread; i++){
-		int block_offset  = itemsPerThread * blockIdx.x * blockDim.x;
-		int thread_offset = itemsPerThread * threadIdx.x;
-		int index = block_offset + thread_offset + i;
-
-		if(index >= size){
-			break;
-		}
-
-		int x = index % int(uniforms.width);
-		int y = index / int(uniforms.width);
-
-		uint32_t color = 0x00112233;
-
-		surf2Dwrite(color, gl_colorbuffer, x * 4, y);
-	}
-
-}

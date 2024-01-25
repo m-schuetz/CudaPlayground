@@ -31,6 +31,7 @@ struct{
 	bool lockFrustum          = false;
 	int cullingMode           = 0; // 0...None, 1...back faces, 2...front faces
 	int showHeatmap           = 0; // 0...Not, 1...step of 1, 2...steps of 2, 3...steps of 3, 4...steps of 4, 5...steps of 5, 6...logarithmic
+	bool requestReset         = false;
 } settings;
 
 float duration_scene;
@@ -43,6 +44,9 @@ CUdeviceptr cptr_heatmap;
 CUdeviceptr cptr_models, cptr_numModels;
 CUdeviceptr cptr_patches, cptr_numPatches;
 CUdeviceptr cptr_stats;
+
+CUdeviceptr cptr_patchPool;
+CUdeviceptr cptr_patchStorage;
 
 Stats stats;
 void* h_stats_pinned = nullptr;
@@ -62,41 +66,12 @@ void initCuda(){
 	cuCtxCreate(&context, 0, cuDevice);
 }
 
-void renderCUDA(shared_ptr<GLRenderer> renderer){
-
-	cuGraphicsGLRegisterImage(
-		&cugl_colorbuffer, 
-		renderer->view.framebuffer->colorAttachments[0]->handle, 
-		GL_TEXTURE_2D, 
-		CU_GRAPHICS_REGISTER_FLAGS_WRITE_DISCARD);
-
-	CUresult resultcode = CUDA_SUCCESS;
-
-	CUdevice device;
-	int numSMs;
-	cuCtxGetDevice(&device);
-	cuDeviceGetAttribute(&numSMs, CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, device);
-
-	std::vector<CUgraphicsResource> dynamic_resources = {cugl_colorbuffer};
-	cuGraphicsMapResources(dynamic_resources.size(), dynamic_resources.data(), ((CUstream)CU_STREAM_DEFAULT));
-	CUDA_RESOURCE_DESC res_desc = {};
-	res_desc.resType = CUresourcetype::CU_RESOURCE_TYPE_ARRAY;
-	cuGraphicsSubResourceGetMappedArray(&res_desc.res.array.hArray, cugl_colorbuffer, 0, 0);
-	CUsurfObject output_surf;
-	cuSurfObjectCreate(&output_surf, &res_desc);
-
-	// cuEventRecord(cevent_start, 0);
-
-	static float time = 0;
-
-	if(!settings.isPaused){
-		time += settings.timeSinceLastFrame;
-	}
+Uniforms getUniforms(shared_ptr<GLRenderer> renderer){
 
 	Uniforms uniforms;
 	uniforms.width = renderer->width;
 	uniforms.height = renderer->height;
-	uniforms.time = time;
+	// uniforms.time = time;
 	uniforms.method = settings.method;
 	uniforms.model = settings.model;
 	uniforms.isPaused = settings.isPaused;
@@ -104,6 +79,7 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 	uniforms.lockFrustum = settings.lockFrustum;
 	uniforms.cullingMode = settings.cullingMode;
 	uniforms.showHeatmap = settings.showHeatmap;
+	uniforms.frameCount = renderer->frameCount;
 
 	glm::mat4 rotX = glm::rotate(glm::mat4(), 3.1415f * 0.5f, glm::vec3(1.0, 0.0, 0.0));
 
@@ -135,210 +111,73 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 	float values[16];
 	memcpy(&values, &worldViewProj, sizeof(worldViewProj));
 
+	return uniforms;
+}
+
+void reset(shared_ptr<GLRenderer> renderer){
+
+	Uniforms uniforms = getUniforms(renderer);
+
+	void* args[] = {
+		&uniforms, &cptr_buffer, &cptr_framebuffer, &cptr_heatmap,
+		&cptr_models, &cptr_numModels, 
+		&cptr_patches, &cptr_numPatches, 
+		&cptr_patchPool, &cptr_patchStorage, 
+		&cptr_stats
+	};
+
+
+	cuda_program->launch("kernel_create_scene", args);
+}
+
+void renderCUDA(shared_ptr<GLRenderer> renderer){
+
+	cuGraphicsGLRegisterImage(
+		&cugl_colorbuffer, 
+		renderer->view.framebuffer->colorAttachments[0]->handle, 
+		GL_TEXTURE_2D, 
+		CU_GRAPHICS_REGISTER_FLAGS_WRITE_DISCARD);
+
+	CUresult resultcode = CUDA_SUCCESS;
+
+	CUdevice device;
+	int numSMs;
+	cuCtxGetDevice(&device);
+	cuDeviceGetAttribute(&numSMs, CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, device);
+
+	std::vector<CUgraphicsResource> dynamic_resources = {cugl_colorbuffer};
+	cuGraphicsMapResources(dynamic_resources.size(), dynamic_resources.data(), ((CUstream)CU_STREAM_DEFAULT));
+	CUDA_RESOURCE_DESC res_desc = {};
+	res_desc.resType = CUresourcetype::CU_RESOURCE_TYPE_ARRAY;
+	cuGraphicsSubResourceGetMappedArray(&res_desc.res.array.hArray, cugl_colorbuffer, 0, 0);
+	CUsurfObject output_surf;
+	cuSurfObjectCreate(&output_surf, &res_desc);
+
+	static float time = 0;
+	if(!settings.isPaused){
+		time += settings.timeSinceLastFrame;
+	}
+
+	Uniforms uniforms = getUniforms(renderer);
+	uniforms.time = time;
+
 	cuMemcpyDtoHAsync(h_stats_pinned, cptr_stats, sizeof(Stats), ((CUstream)CU_STREAM_DEFAULT));
 	memcpy(&stats, h_stats_pinned, sizeof(Stats));
 
+	void* args[] = {
+		&uniforms, &cptr_buffer, &cptr_framebuffer, &cptr_heatmap,
+		&cptr_models, &cptr_numModels, 
+		&cptr_patches, &cptr_numPatches, 
+		&cptr_patchPool, &cptr_patchStorage, 
+		&output_surf, &cptr_stats
+	};
 
-	{ // CLEAR FRAMEBUFFER
-		int workgroupSize = 1024;
-		int numGroups;
-		auto& kernel = cuda_program->kernels["kernel_clear_framebuffer"];
-		resultcode = cuOccupancyMaxActiveBlocksPerMultiprocessor(&numGroups, kernel, workgroupSize, 0);
-		numGroups *= numSMs;
-		numGroups = std::clamp(numGroups, 10, 100'000);
-
-		void* args[] = {
-			&uniforms, &cptr_buffer, &cptr_framebuffer, &cptr_heatmap,
-			&cptr_models, &cptr_numModels, 
-			&cptr_patches, &cptr_numPatches, 
-			&output_surf, &cptr_stats
-		};
-		
-		auto res_launch = cuLaunchCooperativeKernel(kernel,
-			numGroups, 1, 1,
-			workgroupSize, 1, 1,
-			0, 0, args);
-
-		if(res_launch != CUDA_SUCCESS){
-			const char* str; 
-			cuGetErrorString(res_launch, &str);
-			printf("error: %s \n", str);
-		}
-	}
-
-	if(settings.method == METHOD_SAMPLEPERF_TEST){
-		int workgroupSize = 1024;
-		int numGroups;
-		auto& kernel = cuda_program->kernels["kernel_sampleperf_test"];
-		resultcode = cuOccupancyMaxActiveBlocksPerMultiprocessor(&numGroups, kernel, workgroupSize, 0);
-		numGroups *= numSMs;
-		numGroups = std::clamp(numGroups, 10, 100'000);
-
-		void* args[] = {
-			&uniforms, &cptr_buffer, &cptr_framebuffer, &cptr_heatmap,
-			&cptr_models, &cptr_numModels, 
-			&cptr_patches, &cptr_numPatches, 
-			&output_surf, &cptr_stats
-		};
-		
-		auto res_launch = cuLaunchCooperativeKernel(kernel,
-			numGroups, 1, 1,
-			workgroupSize, 1, 1,
-			0, 0, args);
-
-		if(res_launch != CUDA_SUCCESS){
-			const char* str; 
-			cuGetErrorString(res_launch, &str);
-			printf("error: %s \n", str);
-		}
-	}else{
-
-		{ // GENERATE SCENE
-			cuEventRecord(cevent_start_scene, 0);
-
-			int workgroupSize = 256;
-			int numGroups;
-			auto& kernel = cuda_program->kernels["kernel_generate_scene"];
-			resultcode = cuOccupancyMaxActiveBlocksPerMultiprocessor(&numGroups, kernel, workgroupSize, 0);
-			numGroups *= numSMs;
-			numGroups = std::clamp(numGroups, 10, 100'000);
-
-			void* args[] = {
-				&uniforms, &cptr_buffer, 
-				&cptr_models, &cptr_numModels, 
-				&cptr_patches, &cptr_numPatches, 
-				&output_surf, &cptr_stats
-			};
-
-			auto res_launch = cuLaunchCooperativeKernel(kernel,
-				numGroups, 1, 1,
-				workgroupSize, 1, 1,
-				0, 0, args);
-
-			if(res_launch != CUDA_SUCCESS){
-				const char* str; 
-				cuGetErrorString(res_launch, &str);
-				printf("error: %s \n", str);
-			}
-
-			cuEventRecord(cevent_end_scene, 0);
-		}
-
-		{ // GENERATE PATCHES
-			cuEventRecord(cevent_start_patches, 0);
-
-			int workgroupSize = 256;
-			int numGroups;
-			auto& kernel = cuda_program->kernels["kernel_generate_patches"];
-			resultcode = cuOccupancyMaxActiveBlocksPerMultiprocessor(&numGroups, kernel, workgroupSize, 0);
-			numGroups *= numSMs;
-			numGroups = std::clamp(numGroups, 10, 100'000);
-
-			void* args[] = {
-				&uniforms, &cptr_buffer, 
-				&cptr_models, &cptr_numModels, 
-				&cptr_patches, &cptr_numPatches, 
-				&output_surf, &cptr_stats
-			};
-
-			auto res_launch = cuLaunchCooperativeKernel(kernel,
-				numGroups, 1, 1,
-				workgroupSize, 1, 1,
-				0, 0, args);
-
-			if(res_launch != CUDA_SUCCESS){
-				const char* str; 
-				cuGetErrorString(res_launch, &str);
-				printf("error: %s \n", str);
-			}
-
-			cuEventRecord(cevent_end_patches, 0);
-		}
-
-		cuEventRecord(cevent_start_rasterization, 0);
-
-		if(settings.method == METHOD_32X32){
-			int workgroupSize = 1024;
-			int numGroups;
-			auto& kernel = cuda_program->kernels["kernel_rasterize_patches_32x32"];
-			resultcode = cuOccupancyMaxActiveBlocksPerMultiprocessor(&numGroups, kernel, workgroupSize, 0);
-			numGroups *= numSMs;
-			numGroups = std::clamp(numGroups, 10, 100'000);
-
-			void* args[] = {
-				&uniforms, &cptr_buffer, &cptr_framebuffer, &cptr_heatmap,
-				&cptr_models, &cptr_numModels, 
-				&cptr_patches, &cptr_numPatches, 
-				&output_surf, &cptr_stats
-			};
-			
-			auto res_launch = cuLaunchCooperativeKernel(kernel,
-				numGroups, 1, 1,
-				workgroupSize, 1, 1,
-				0, 0, args);
-
-			if(res_launch != CUDA_SUCCESS){
-				const char* str; 
-				cuGetErrorString(res_launch, &str);
-				printf("error: %s \n", str);
-			}
-		}else if(settings.method == METHOD_RUNNIN_THRU){
-			int workgroupSize = 64;
-			int numGroups;
-			auto& kernel = cuda_program->kernels["kernel_rasterize_patches_runnin_thru"];
-			resultcode = cuOccupancyMaxActiveBlocksPerMultiprocessor(&numGroups, kernel, workgroupSize, 0);
-			numGroups *= numSMs;
-			numGroups = std::clamp(numGroups, 10, 100'000);
-
-			void* args[] = {
-				&uniforms, &cptr_buffer, &cptr_framebuffer, &cptr_heatmap,
-				&cptr_models, &cptr_numModels, 
-				&cptr_patches, &cptr_numPatches, 
-				&output_surf, &cptr_stats
-			};
-			
-			auto res_launch = cuLaunchCooperativeKernel(kernel,
-				numGroups, 1, 1,
-				workgroupSize, 1, 1,
-				0, 0, args);
-
-			if(res_launch != CUDA_SUCCESS){
-				const char* str; 
-				cuGetErrorString(res_launch, &str);
-				printf("error: %s \n", str);
-			}
-		}
-
-		cuEventRecord(cevent_end_rasterization, 0);
-
-	}
-
-	{ // TRANSFER FRAMEBUFFER TO OPENGL TEXTURE
-		int workgroupSize = 1024;
-		int numGroups;
-		auto& kernel = cuda_program->kernels["kernel_framebuffer_to_OpenGL"];
-		resultcode = cuOccupancyMaxActiveBlocksPerMultiprocessor(&numGroups, kernel, workgroupSize, 0);
-		numGroups *= numSMs;
-		numGroups = std::clamp(numGroups, 10, 100'000);
-
-		void* args[] = {
-			&uniforms, &cptr_buffer, &cptr_framebuffer, &cptr_heatmap,
-			&cptr_models, &cptr_numModels, 
-			&cptr_patches, &cptr_numPatches, 
-			&output_surf, &cptr_stats
-		};
-		
-		auto res_launch = cuLaunchCooperativeKernel(kernel,
-			numGroups, 1, 1,
-			workgroupSize, 1, 1,
-			0, 0, args);
-
-		if(res_launch != CUDA_SUCCESS){
-			const char* str; 
-			cuGetErrorString(res_launch, &str);
-			printf("error: %s \n", str);
-		}
-	}
+	// reset(renderer);
+	// cuda_program->launch("kernel_create_scene", args);
+	cuda_program->launch("kernel_clear_framebuffer", args);
+	cuda_program->launch("kernel_update_patches", args);
+	cuda_program->launch("kernel_rasterize", args);
+	cuda_program->launch("kernel_framebuffer_to_OpenGL", args);
 
 	cuCtxSynchronize();
 
@@ -362,6 +201,9 @@ void initCudaProgram(shared_ptr<GLRenderer> renderer){
 	cuMemAlloc(&cptr_numModels, 8);
 	cuMemAlloc(&cptr_numPatches, 8);
 
+	cuMemAlloc(&cptr_patchPool, PATCHES_CAPACITY * sizeof(Patch*));
+	cuMemAlloc(&cptr_patchStorage, sizeof(Patch) * PATCHES_CAPACITY);
+
 	cuMemAlloc(&cptr_stats, sizeof(Stats));
 	cuMemAllocHost((void**)&h_stats_pinned , sizeof(Stats));
 
@@ -371,14 +213,11 @@ void initCudaProgram(shared_ptr<GLRenderer> renderer){
 			"./modules/rasterizeParametric/utils.cu",
 		},
 		.kernels = {
-			"kernel_sampleperf_test",
-			"kernel_generate_scene", 
-			"kernel_generate_patches", 
-			"kernel_rasterize_patches_32x32",
-			"kernel_rasterize_patches_runnin_thru",
+			"kernel_create_scene",
+			"kernel_update_patches",
+			"kernel_rasterize",
 			"kernel_clear_framebuffer",
 			"kernel_framebuffer_to_OpenGL",
-			"kernel_test"
 		}
 	});
 
@@ -408,6 +247,8 @@ int main(){
 	initCuda();
 	initCudaProgram(renderer);
 
+	reset(renderer);
+
 
 	auto update = [&](){
 		static double lastFrameTime = now();
@@ -420,6 +261,11 @@ int main(){
 		renderer->view.framebuffer->setSize(renderer->width, renderer->height);
 
 		glBindFramebuffer(GL_FRAMEBUFFER, renderer->view.framebuffer->handle);
+
+		if(settings.requestReset){
+			reset(renderer);
+			settings.requestReset = false;
+		}
 
 		renderCUDA(renderer);
 
@@ -526,6 +372,10 @@ int main(){
 			string label = settings.isPaused ? "Resume" : "Pause";
 			if (ImGui::Button(label.c_str())){
 				settings.isPaused = !settings.isPaused;
+			}
+
+			if (ImGui::Button("Reset")){
+				settings.requestReset = true;
 			}
 
 			ImGui::Checkbox("Enable Refinement",       &settings.enableRefinement);

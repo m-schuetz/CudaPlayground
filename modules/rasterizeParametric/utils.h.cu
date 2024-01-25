@@ -63,6 +63,37 @@ void processRange(int size, Function&& f){
 	}
 }
 
+// Loops through [0, size), but blockwise instead of threadwise.
+// That is, all threads of block 0 are called with index 0, block 1 with index 1, etc.
+// Intented for when <size> is larger than the number of blocks,
+// e.g., size 10'000 but #blocks only 100, then the blocks will keep looping until all indices are processed.
+inline int for_blockwise_counter;
+template<typename Function>
+inline void for_blockwise(int size, Function&& f){
+	auto grid = cg::this_grid();
+	auto block = cg::this_thread_block();
+
+	__shared__ int sh_index;
+	sh_index = 0;
+	for_blockwise_counter = 0;
+
+	grid.sync();
+
+	while(true){
+
+		if(block.thread_rank() == 0){
+			uint32_t index = atomicAdd(&for_blockwise_counter, 1);
+			sh_index = index;
+		}
+
+		block.sync();
+
+		if(sh_index >= size) break;
+
+		f(sh_index);
+	}
+}
+
 void printNumber(int64_t number, int leftPad = 0);
 
 struct Allocator{
@@ -147,4 +178,22 @@ inline float millitime(){
 	float millies = float(nanotime / 1000llu) / 1000.0f;
 
 	return millies;
+}
+
+// see https://stackoverflow.com/a/51549250
+__forceinline__ float atomicMinFloat (float * addr, float value) {
+	float old;
+	old = (value >= 0) ? __int_as_float(atomicMin((int *)addr, __float_as_int(value))) :
+			__uint_as_float(atomicMax((unsigned int *)addr, __float_as_uint(value)));
+
+	return old;
+}
+
+// see https://stackoverflow.com/a/51549250
+__forceinline__ float atomicMaxFloat (float * addr, float value) {
+	float old;
+	old = (value >= 0) ? __int_as_float(atomicMax((int *)addr, __float_as_int(value))) :
+			__uint_as_float(atomicMin((unsigned int *)addr, __float_as_uint(value)));
+
+	return old;
 }
