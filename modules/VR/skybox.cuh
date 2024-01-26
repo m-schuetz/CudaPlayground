@@ -9,9 +9,12 @@ void drawSkybox(
 	float width, float height,
 	const Skybox& skybox
 ){ 
-	auto projToWorld = [&](float4 pos){
+	auto projToWorld = [&](float4 pos) -> float4{
 		float4 viewspace = proj_inv * pos;
-		viewspace = viewspace / viewspace.w;
+
+		if(!uniforms.vrEnabled){
+			viewspace = viewspace / viewspace.w;
+		}
 
 		return view_inv * viewspace;
 	};
@@ -141,6 +144,27 @@ void drawSkybox(
 		rgba[0] = textureData[4 * texelIndex + 0];
 		rgba[1] = textureData[4 * texelIndex + 1];
 		rgba[2] = textureData[4 * texelIndex + 2];
+
+		// rgba[0] = -dir.x * 200.0f;
+		// rgba[1] = -dir.y * 200.0f;
+		// rgba[2] = -dir.z * 200.0f;
+
+		// if(x == 1000 && y == 1000){
+
+		// 	float3 abc3 = origin;
+		// 	printf("dir: %.1f, %.1f, %.1f \n", abc3.x, abc3.y, abc3.z);
+
+		// 	float4 abc = view_inv * proj_inv * dir_00_projspace;
+		// 	printf("dir: %.1f, %.1f, %.1f, %1f \n", abc.x, abc.y, abc.z, abc.w);
+
+		// 	// mat4 mat = proj_inv;
+		// 	// mat4 mat = view_inv;
+		// 	// printf("==================\n");
+		// 	// printf("%6.1f, %6.1f, %6.1f, %6.1f \n", mat[0].x, mat[0].y, mat[0].z, mat[0].w);
+		// 	// printf("%6.1f, %6.1f, %6.1f, %6.1f \n", mat[1].x, mat[1].y, mat[1].z, mat[1].w);
+		// 	// printf("%6.1f, %6.1f, %6.1f, %6.1f \n", mat[2].x, mat[2].y, mat[2].z, mat[2].w);
+		// 	// printf("%6.1f, %6.1f, %6.1f, %6.1f \n", mat[3].x, mat[3].y, mat[3].z, mat[3].w);
+		// }
 
 		float depth = 100000000000.0f;
 		uint64_t idepth = *((uint32_t*)&depth);

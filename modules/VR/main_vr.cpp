@@ -443,8 +443,10 @@ int main(){
 
 		{ // INFO WINDOW
 
-			ImGui::SetNextWindowPos(ImVec2(10, 280));
-			ImGui::SetNextWindowSize(ImVec2(490, 180));
+			if(ImGuiCond_FirstUseEver){
+				ImGui::SetNextWindowPos(ImVec2(10, 280));
+				ImGui::SetNextWindowSize(ImVec2(490, 180));
+			}
 
 			ImGui::Begin("Infos");
 			
@@ -458,8 +460,10 @@ int main(){
 
 		{ // SETTINGS WINDOW
 
-			ImGui::SetNextWindowPos(ImVec2(10, 280 + 180 + 10));
-			ImGui::SetNextWindowSize(ImVec2(490, 230));
+			if(ImGuiCond_FirstUseEver){
+				ImGui::SetNextWindowPos(ImVec2(10, 280 + 180 + 10));
+				ImGui::SetNextWindowSize(ImVec2(490, 230));
+			}
 
 			ImGui::Begin("Settings");
 
@@ -481,7 +485,10 @@ int main(){
 		}
 
 		{ // STATS WINDOW
-			ImGui::SetNextWindowSize(ImVec2(490, 230));
+			if(ImGuiCond_FirstUseEver){
+				ImGui::SetNextWindowSize(ImVec2(490, 230));
+			}
+
 
 			ImGui::Begin("Stats");
 

@@ -6,8 +6,9 @@
 #include "helper_math.h"
 #include "HostDeviceInterface.h"
 
-
 #include "triangles.cuh"
+#include "lines.cuh"
+#include "points.cuh"
 #include "texture.cuh"
 #include "voxels.cuh"
 #include "globals.cuh"
@@ -52,31 +53,8 @@ void kernel(
 	Allocator _allocator(buffer, 0);
 	allocator = &_allocator;
 
-	uint32_t* voxelGrid = allocator->alloc<uint32_t*>(numCells * sizeof(uint32_t));
-
-	// clear/initialize voxel grid, if necessary. Note that this is done every frame.
-	// processRange(0, numCells, [&](int voxelIndex){
-	// 	int x = voxelIndex % gridSize;
-	// 	int y = voxelIndex % (gridSize * gridSize) / gridSize;
-	// 	int z = voxelIndex / (gridSize * gridSize);
-
-	// 	float fx = 2.0f * float(x) / fGridSize - 1.0f;
-	// 	float fy = 2.0f * float(y) / fGridSize - 1.0f;
-	// 	float fz = 2.0f * float(z) / fGridSize - 1.0f;
-
-	// 	// clear and make sphere and ground plane
-	// 	if(fx * fx + fy * fy + fz * fz < 0.1f){
-	// 		voxelGrid[voxelIndex] = 123;
-	// 	}else if(x > 10 && x < gridSize - 10 && z < 4){
-	// 		voxelGrid[voxelIndex] = 123;
-
-	// 	}else{
-	// 		voxelGrid[voxelIndex] = 0;
-	// 	}
-
-	// 	// clear everything
-	// 	// voxelGrid[voxelIndex] = 0;
-	// });
+	curandStateXORWOW_t thread_random_state;
+	curand_init(grid.thread_rank(), 0, 0, &thread_random_state);
 
 	{ // clear framebuffer
 		uint64_t clearValue = (uint64_t(Infinity) << 32ull) | uint64_t(BACKGROUND_COLOR);
@@ -84,9 +62,11 @@ void kernel(
 
 		if(uniforms.vrEnabled){
 			clearBuffer_u64(fb_vr_left, clearValue, uniforms.vr_left_width * uniforms.vr_left_height);
-			clearBuffer_u64(fb_vr_left, clearValue, uniforms.vr_right_width * uniforms.vr_right_height);
+			clearBuffer_u64(fb_vr_right, clearValue, uniforms.vr_right_width * uniforms.vr_right_height);
 		}
 	}
+
+	g_lines.count = 0;
 
 	RasterizationSettings rs_main;
 	RasterizationSettings rs_left;
@@ -118,7 +98,7 @@ void kernel(
 	grid.sync();
 
 	{ // generate and draw a ground plane
-		Triangles* triangles = createGroundPlane();
+		Triangles* triangles = createGroundPlane(50);
 		Texture texture = createGridTexture();
 
 		grid.sync();
@@ -142,122 +122,71 @@ void kernel(
 
 	grid.sync();
 
-	// VOXEL PAINTING / CONTROLLER INPUT
-	if(grid.thread_rank() == 0){
+	{
+		Triangles* sphere = createSphere(24);
 
-		// see openvr.h: EVRButtonId and ButtonMaskFromId
-		uint64_t triggerMask = 1ull << 33ull;
-		bool leftTriggerButtonDown = (uniforms.vr_left_controller_state.buttonPressedMask & triggerMask) != 0;
-		bool rightTriggerButtonDown = (uniforms.vr_right_controller_state.buttonPressedMask & triggerMask) != 0;
-		bool isTriggerDown = leftTriggerButtonDown || rightTriggerButtonDown;
 
-		// printf("%llu \n", leftTriggerButtonDown);
-		
-		if(rightTriggerButtonDown){
-			float brushRadius = 3.0;
-			int iBrushRadius = ceil(brushRadius);
-			float brushRadius2 = brushRadius * brushRadius;
+		for(int i = 0; i <= 10; i++)
+		for(int j = -10; j <= 10; j += 2)
+		// for(int j : {0, 1, 2})
+		// for(int i : {1})
+		// for(int j : {-5})
+		{
+			// uint32_t X = curand(&thread_random_state) >> 16;
+			// uint32_t Y = curand(&thread_random_state) >> 16;
+			// uint32_t Z = curand(&thread_random_state) >> 16;
+			// uint32_t upper = 1 << 16;
+
+			// float x = float(X) / float(upper) - 0.5f;
+			// float y = float(Y) / float(upper) - 0.5f;
+			// float z = float(Z) / float(upper) - 0.5f;
+
+			float x = i - 5;
+
+			rs_main.texture = nullptr;
+			rs_main.colorMode = COLORMODE_UV;
+			rs_main.world = mat4::translate(x, -j - 1.0f, -0.3f) * mat4::scale(0.2f, 0.2f, 0.2f);
 			
-			mat4 rot = mat4::rotate(0.5f * PI, {1.0f, 0.0f, 0.0f}).transpose();
-			float4 pos = rot * uniforms.vr_right_controller_pose.transpose() * float4{0.0f, 0.0f, 0.0f, 1.0f};
-			float3 boxSize = gridMax - gridMin;
 
-			float fx = gridSize * (pos.x - gridMin.x) / boxSize.x;
-			float fy = gridSize * (pos.y - gridMin.y) / boxSize.y;
-			float fz = gridSize * (pos.z - gridMin.z) / boxSize.z;
+			if(uniforms.vrEnabled){
+				RasterizationSettings rs_left;
+				rs_left.texture   = nullptr;
+				rs_left.colorMode = COLORMODE_UV;
+				rs_left.world     = mat4::translate(x, -j - 1.0f, -0.3f) * mat4::scale(0.2f, 0.2f, 0.2f);
+				rs_left.view      = uniforms.vr_left_view;
+				rs_left.proj      = uniforms.vr_left_proj;
+				rs_left.transform = uniforms.vr_left_transform;
+				rs_left.width     = uniforms.vr_left_width;
+				rs_left.height    = uniforms.vr_left_height;
+				
+				rasterizeTriangles(sphere, fb_vr_left, rs_left);
+				grid.sync();
 
-			for(int ox = -iBrushRadius; ox <= brushRadius; ox++)
-			for(int oy = -iBrushRadius; oy <= brushRadius; oy++)
-			for(int oz = -iBrushRadius; oz <= brushRadius; oz++)
-			{
+				RasterizationSettings rs_right;
+				rs_right.texture   = nullptr;
+				rs_right.colorMode = COLORMODE_VERTEXCOLOR;
+				rs_right.world     = mat4::translate(x, -j - 1.0f, -0.3f) * mat4::scale(0.2f, 0.2f, 0.2f);
+				rs_right.view      = uniforms.vr_right_view;
+				rs_right.proj      = uniforms.vr_right_proj;
+				rs_right.transform = uniforms.vr_right_transform;
+				rs_right.width     = uniforms.vr_right_width;
+				rs_right.height    = uniforms.vr_right_height;
+				rasterizeTriangles(sphere, fb_vr_right, rs_right);
 
-				int ix = fx + float(ox);
-				int iy = fy + float(oy);
-				int iz = fz + float(oz);
+				// mat4 transform = uniforms.vr_right_transform;
+				// // mat4 transform = uniforms.vr_right_proj * uniforms.vr_right_view;
+				// float3 position = {x, -0.3f, -j - 1.0f};
+				// rasterizeSprite(fb_vr_right, position, 0x000000ff, 10, transform, uniforms.vr_right_width, uniforms.vr_right_height);
 
-				if(ix < 0 || ix >= gridSize) continue;
-				if(iy < 0 || iy >= gridSize) continue;
-				if(iz < 0 || iz >= gridSize) continue;
-
-				int voxelIndex = ix + iy * gridSize + iz * gridSize * gridSize;
-
-				float vcx = float(ix) + 0.5f;
-				float vcy = float(iy) + 0.5f;
-				float vcz = float(iz) + 0.5f;
-				float dx = vcx - fx;
-				float dy = vcy - fy;
-				float dz = vcz - fz;
-				float dd = dx * dx + dy * dy + dz * dz;
-
-				if(dd < brushRadius2){
-					voxelGrid[voxelIndex] = 123;
-				}
+				grid.sync();
+			}else{
+				// rasterizeTriangles(sphere, framebuffer, rs_main);
+				float3 position = {x, -0.3f, -j - 1.0f};
+				if(grid.thread_rank() == 0)
+				rasterizeSprite(framebuffer, position, 0x000000ff, 10, uniforms.transform, uniforms.width, uniforms.height);
 			}
-		}
 
-		if(leftTriggerButtonDown){
-			float brushRadius = 5.0;
-			int iBrushRadius = ceil(brushRadius);
-			float brushRadius2 = brushRadius * brushRadius;
-			
-			mat4 rot = mat4::rotate(0.5f * PI, {1.0f, 0.0f, 0.0f}).transpose();
-			float4 pos = rot * uniforms.vr_left_controller_pose.transpose() * float4{0.0f, 0.0f, 0.0f, 1.0f};
-			float3 boxSize = gridMax - gridMin;
-
-			float fx = gridSize * (pos.x - gridMin.x) / boxSize.x;
-			float fy = gridSize * (pos.y - gridMin.y) / boxSize.y;
-			float fz = gridSize * (pos.z - gridMin.z) / boxSize.z;
-
-			for(int ox = -iBrushRadius; ox <= brushRadius; ox++)
-			for(int oy = -iBrushRadius; oy <= brushRadius; oy++)
-			for(int oz = -iBrushRadius; oz <= brushRadius; oz++)
-			{
-
-				int ix = fx + float(ox);
-				int iy = fy + float(oy);
-				int iz = fz + float(oz);
-
-				if(ix < 0 || ix >= gridSize) continue;
-				if(iy < 0 || iy >= gridSize) continue;
-				if(iz < 0 || iz >= gridSize) continue;
-
-				int voxelIndex = ix + iy * gridSize + iz * gridSize * gridSize;
-
-				float vcx = float(ix) + 0.5f;
-				float vcy = float(iy) + 0.5f;
-				float vcz = float(iz) + 0.5f;
-				float dx = vcx - fx;
-				float dy = vcy - fy;
-				float dz = vcz - fz;
-				float dd = dx * dx + dy * dy + dz * dz;
-
-				if(dd < brushRadius2){
-					voxelGrid[voxelIndex] = 0;
-				}
-			}
-		}
-	}
-
-	grid.sync();
-
-	{ // DRAW VOXEL GRID
-		
-		Triangles* triangles = marchingCubes(gridMin, gridMax, gridSize, voxelGrid);
-
-		grid.sync();
-		
-		rs_main.texture = nullptr;
-		rs_main.colorMode = COLORMODE_VERTEXCOLOR;
-
-		if(uniforms.vrEnabled){
-			rs_left.texture   = nullptr;
-			rs_left.colorMode  = COLORMODE_VERTEXCOLOR;
-			rs_right.texture   = nullptr;
-			rs_right.colorMode = COLORMODE_VERTEXCOLOR;
-			rasterizeTriangles(triangles, fb_vr_left, rs_left);
-			rasterizeTriangles(triangles, fb_vr_right, rs_right);
-		}else{
-			rasterizeTriangles(triangles, framebuffer, rs_main);
+			grid.sync();
 		}
 	}
 
@@ -278,6 +207,7 @@ void kernel(
 		rs_main.texture    = &texture;
 		rs_left.texture    = &texture;
 		rs_right.texture   = &texture;
+		
 		rs_main.colorMode  = uniforms.colorMode;
 		rs_left.colorMode  = uniforms.colorMode;
 		rs_right.colorMode = uniforms.colorMode;
@@ -291,17 +221,22 @@ void kernel(
 			mat4 wiggle_yaw = mat4::rotate(cos(5.0f * uniforms.time) * 0.1f, {0.0f, 0.0f, 1.0f}).transpose();
 			
 			if(uniforms.vrEnabled){
-
 				float sController = 0.05f;
 
 				rs_left.world = rot * uniforms.vr_left_controller_pose.transpose() 
 					* mat4::scale(sController, sController, sController);
-				rs_right.world = rot * uniforms.vr_right_controller_pose.transpose() 
-					* mat4::scale(sController, sController, sController);
+				rs_right.world = rs_left.world;
+
 				if(uniforms.vr_left_controller_active){
 					rasterizeTriangles(triangles, fb_vr_left, rs_left);
 					rasterizeTriangles(triangles, fb_vr_right, rs_right);
 				}
+
+				grid.sync();
+
+				rs_left.world = rot * uniforms.vr_right_controller_pose.transpose() 
+					* mat4::scale(sController, sController, sController);
+				rs_right.world = rs_left.world;
 
 				if(uniforms.vr_right_controller_active){
 					rasterizeTriangles(triangles, fb_vr_left, rs_left);
@@ -316,6 +251,15 @@ void kernel(
 		}
 	}
 
+	// grid.sync();
+
+	// if(grid.thread_rank() == 0){
+	// 	drawBoundingBox({-2.0f, 0.0f, 0.0f}, {0.5f, 1.0f, 1.5f}, 0x000000ff);
+	// }
+
+	// grid.sync();
+
+	// rasterizeLines(framebuffer, uniforms.transform, uniforms.width, uniforms.height);
 
 }
 
@@ -339,21 +283,21 @@ void kernel_draw_skybox(
 	if(uniforms.vrEnabled){
 
 		// TODO
-		// drawSkybox(
-		// 	uniforms.vr_left_proj, uniforms.vr_left_view, 
-		// 	uniforms.vr_left_proj_inv, uniforms.vr_left_view_inv, 
-		// 	framebuffer, 
-		// 	uniforms.vr_left_width, uniforms.vr_left_height, 
-		// 	skybox
-		// );
+		drawSkybox(
+			uniforms.vr_left_proj, uniforms.vr_left_view, 
+			uniforms.vr_left_proj_inv, uniforms.vr_left_view_inv, 
+			fb_vr_left, 
+			uniforms.vr_left_width, uniforms.vr_left_height, 
+			skybox
+		);
 
-		// drawSkybox(
-		// 	uniforms.vr_right_proj, uniforms.vr_right_view, 
-		// 	uniforms.vr_right_proj_inv, uniforms.vr_right_view_inv, 
-		// 	framebuffer, 
-		// 	uniforms.vr_right_width, uniforms.vr_right_height, 
-		// 	skybox
-		// );
+		drawSkybox(
+			uniforms.vr_right_proj, uniforms.vr_right_view, 
+			uniforms.vr_right_proj_inv, uniforms.vr_right_view_inv, 
+			fb_vr_right, 
+			uniforms.vr_right_width, uniforms.vr_right_height, 
+			skybox
+		);
 		
 		// if(grid.thread_rank() == 0){
 		// 	mat4 mat = uniforms.vr_right_proj_inv;
@@ -442,6 +386,7 @@ void kernel_toOpenGL(
 				rgba[2] = float(rgba[2]) * shade;
 			}
 
+			// color = 0x000000ff;
 			surf2Dwrite(color, gl_colorbuffer_vr_left, x * 4, y);
 		});
 
@@ -491,6 +436,7 @@ void kernel_toOpenGL(
 				rgba[2] = float(rgba[2]) * shade;
 			}
 
+			// color = 0x000000ff;
 			surf2Dwrite(color, gl_colorbuffer_vr_right, x * 4, y);
 		});
 
@@ -520,6 +466,7 @@ void kernel_toOpenGL(
 				color = encoded & 0xffffffffull;
 			}
 
+			// color = 0x000000ff;
 			surf2Dwrite(color, gl_colorbuffer_main, x * 4, y);
 		});
 

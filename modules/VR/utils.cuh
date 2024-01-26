@@ -61,6 +61,38 @@ void processRange(int size, Function&& f){
 	}
 }
 
+// Loops through [0, size), but blockwise instead of threadwise.
+// That is, all threads of block 0 are called with index 0, block 1 with index 1, etc.
+// Intented for when <size> is larger than the number of blocks,
+// e.g., size 10'000 but #blocks only 100, then the blocks will keep looping until all indices are processed.
+inline int for_blockwise_counter;
+template<typename Function>
+inline void for_blockwise(int size, Function&& f){
+	auto grid = cg::this_grid();
+	auto block = cg::this_thread_block();
+
+	__shared__ int sh_index;
+	sh_index = 0;
+	for_blockwise_counter = 0;
+
+	grid.sync();
+
+	while(true){
+
+		if(block.thread_rank() == 0){
+			uint32_t index = atomicAdd(&for_blockwise_counter, 1);
+			sh_index = index;
+		}
+
+		block.sync();
+
+		if(sh_index >= size) break;
+
+		f(sh_index);
+	}
+}
+
+
 
 void printNumber(int64_t number, int leftPad = 0);
 
