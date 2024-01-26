@@ -260,6 +260,7 @@ struct Uniforms{
 	float width;
 	float height;
 	float time;
+	float deltatime;
 	mat4 world;
 	mat4 view;
 	mat4 proj;
@@ -268,6 +269,7 @@ struct Uniforms{
 	mat4 transform;
 	int colorMode;
 	int sampleMode;
+	int frameCount;
 
 	bool vrEnabled;
 

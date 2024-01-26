@@ -57,6 +57,34 @@ uint32_t SPECTRAL[11] = {
 	0xa24f5e,
 };
 
+// void initParticle(
+// 	float3& pos, uint32_t& color, float& lifetime, float3& velocity, 
+// 	curandStateXORWOW_t& thread_random_state
+// ){
+
+// 	uint32_t X = curand(&thread_random_state) >> 16;
+// 	uint32_t Y = curand(&thread_random_state) >> 16;
+// 	uint32_t Z = curand(&thread_random_state) >> 16;
+// 	uint32_t upper = 1 << 16;
+
+// 	uint32_t color = curand(&thread_random_state);
+
+// 	color = SPECTRAL[color % 11];
+
+// 	float x = 10.0f * (float(X) / float(upper) - 0.5f);
+// 	float y =  1.0f * (float(Y) / float(upper) - 0.5f) - 0.8f;
+// 	float z = 10.0f * (float(Z) / float(upper) - 0.5f);
+
+// 	uint32_t lifetime_ms = curand(&thread_random_state) % 2000 + 1000;
+// 	uint32_t ispeed = curand(&thread_random_state) % 2000 + 1000;
+// 	float speed = float(ispeed) * 0.001f;
+
+// 	pos.x = x;
+// 	pos.y = y;
+// 	pos.z = z;
+
+// }
+
 extern "C" __global__
 void kernel(
 	const Uniforms _uniforms,
@@ -119,7 +147,8 @@ void kernel(
 
 
 
-	// clear particles
+	// clear/reset particles
+	if(uniforms.frameCount == 0)
 	processRange(MAX_PARTICLES, [&](int index){
 		uint32_t X = curand(&thread_random_state) >> 16;
 		uint32_t Y = curand(&thread_random_state) >> 16;
@@ -135,16 +164,40 @@ void kernel(
 		float z = 10.0f * (float(Z) / float(upper) - 0.5f);
 
 		uint32_t lifetime_ms = curand(&thread_random_state) % 2000 + 1000;
+		uint32_t ispeed = curand(&thread_random_state) % 2000 + 1000;
+		float speed = float(ispeed) * 0.001f;
 
 		particles.position[index] = float3{x, y, z};
 		particles.color[index] = color;
 		particles.age[index] = 0.0f;
 		particles.lifetime[index] = float(lifetime_ms) / 1000.0f;
+		particles.velocity[index] = float3{0.0f, speed, 0.0f};
+	});
+
+	// update particles
+	processRange(MAX_PARTICLES, [&](int index){
+		
+		float age = particles.age[index];
+
+		if(age < 0.0f) return;
+
+		
+
+		float3 velocity = particles.velocity[index];
+		float3 diff = uniforms.deltatime * velocity;
+
+		particles.position[index] += diff;
+		particles.age[index] += uniforms.deltatime;
+
+		// particles.position[index] = float3{x, y, z};
+		// particles.color[index] = color;
+		// particles.age[index] = 0.0f;
+		// particles.lifetime[index] = float(lifetime_ms) / 1000.0f;
 
 		// g_particles.position[index] = float3{0.0f, 0.0f, 0.0f};
 		// g_particles.color[index] = 0;
 		// g_particles.age[index] = -1.0f;
-		particles.velocity[index] = float3{0.0f, 0.0f, 0.0f};
+		// particles.velocity[index] = float3{0.0f, 0.0f, 0.0f};
 	});
 
 

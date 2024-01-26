@@ -224,7 +224,7 @@ void GLRenderer::loop(function<void(void)> update, function<void(void)> render){
 	while (!glfwWindowShouldClose(window)){
 
 		// TIMING
-		double timeSinceLastFrame;
+		// double timeSinceLastFrame;
 		{
 			double tCurrent = now();
 			timeSinceLastFrame = tCurrent - tPrevious;

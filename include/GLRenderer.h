@@ -182,6 +182,7 @@ struct GLRenderer{
 
 	int width = 0;
 	int height = 0;
+	double timeSinceLastFrame = 0.0;
 	string selectedMethod = "";
 
 	GLRenderer();

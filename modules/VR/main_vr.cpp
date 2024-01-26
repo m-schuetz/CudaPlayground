@@ -25,6 +25,8 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
+#include "PxPhysicsAPI.h"
+
 using namespace std;
 
 CUdeviceptr cptr_buffer;
@@ -76,6 +78,8 @@ Uniforms getUniforms(shared_ptr<GLRenderer> renderer){
 	uniforms.width = renderer->width;
 	uniforms.height = renderer->height;
 	uniforms.time = now();
+	uniforms.deltatime = renderer->timeSinceLastFrame;
+	uniforms.frameCount = renderer->frameCount;
 	uniforms.colorMode = colorMode;
 	uniforms.sampleMode = sampleMode;
 
@@ -323,9 +327,29 @@ void initCudaProgram(
 	// cuGraphicsGLRegisterImage(&cugl_vr_left, viewLeft.framebuffer->colorAttachments[0]->handle, GL_TEXTURE_2D, CU_GRAPHICS_REGISTER_FLAGS_WRITE_DISCARD);
 	// cuGraphicsGLRegisterImage(&cugl_vr_right, viewRight.framebuffer->colorAttachments[0]->handle, GL_TEXTURE_2D, CU_GRAPHICS_REGISTER_FLAGS_WRITE_DISCARD);
 }
+//
+// PHYSX ===============================================
+using namespace physx;
 
+static PxDefaultAllocator		gAllocator;
+static PxDefaultErrorCallback	gErrorCallback;
+static PxFoundation*			gFoundation = NULL;
+static PxPhysics*				gPhysics	= NULL;
+static PxDefaultCpuDispatcher*	gDispatcher = NULL;
+static PxScene*					gScene		= NULL;
+static PxMaterial*				gMaterial	= NULL;
+static PxPvd*					gPvd        = NULL;
+
+void initPhysx(){
+	gFoundation = PxCreateFoundation(PX_PHYSICS_VERSION, gAllocator, gErrorCallback);
+}
+// PHYSX ===============================================
 
 int main(){
+
+	initPhysx();
+
+	
 
 	cout << std::setprecision(2) << std::fixed;
 	setlocale( LC_ALL, "en_AT.UTF-8" );
