@@ -57,33 +57,46 @@ uint32_t SPECTRAL[11] = {
 	0xa24f5e,
 };
 
-// void initParticle(
-// 	float3& pos, uint32_t& color, float& lifetime, float3& velocity, 
-// 	curandStateXORWOW_t& thread_random_state
-// ){
+void spawnParticle(
+	float3 origin,
+	float3& pos, uint32_t& color, float& lifetime, float3& velocity, 
+	curandStateXORWOW_t& thread_random_state
+){
 
-// 	uint32_t X = curand(&thread_random_state) >> 16;
-// 	uint32_t Y = curand(&thread_random_state) >> 16;
-// 	uint32_t Z = curand(&thread_random_state) >> 16;
-// 	uint32_t upper = 1 << 16;
+	uint32_t X = curand(&thread_random_state) >> 16;
+	uint32_t Y = curand(&thread_random_state) >> 16;
+	uint32_t Z = curand(&thread_random_state) >> 16;
+	uint32_t upper = 1 << 16;
 
-// 	uint32_t color = curand(&thread_random_state);
+	uint32_t vX = curand(&thread_random_state) % 1000;
+	uint32_t vY = curand(&thread_random_state) % 1000;
+	uint32_t vZ = curand(&thread_random_state) % 1000;
+	
+	velocity = {
+		float(vX) / 1000.0f - 0.5f,
+		float(vY) / 1000.0f ,
+		float(vZ) / 1000.0f - 0.5f,
+	};
 
-// 	color = SPECTRAL[color % 11];
+	uint32_t colorID = curand(&thread_random_state);
 
-// 	float x = 10.0f * (float(X) / float(upper) - 0.5f);
-// 	float y =  1.0f * (float(Y) / float(upper) - 0.5f) - 0.8f;
-// 	float z = 10.0f * (float(Z) / float(upper) - 0.5f);
+	color = SPECTRAL[colorID % 11];
 
-// 	uint32_t lifetime_ms = curand(&thread_random_state) % 2000 + 1000;
-// 	uint32_t ispeed = curand(&thread_random_state) % 2000 + 1000;
-// 	float speed = float(ispeed) * 0.001f;
+	float x = origin.x + 10.0f * (float(X) / float(upper) - 0.5f);
+	float y = origin.y +  1.0f * (float(Y) / float(upper) - 0.5f);
+	float z = origin.z + 10.0f * (float(Z) / float(upper) - 0.5f);
 
-// 	pos.x = x;
-// 	pos.y = y;
-// 	pos.z = z;
+	uint32_t lifetime_ms = curand(&thread_random_state) % 15000 + 100;
+	uint32_t ispeed = curand(&thread_random_state) % 2000 + 1000;
+	float speed = float(ispeed) * 0.001f;
 
-// }
+	lifetime = log2f(float(lifetime_ms) * 0.001f);
+
+	pos.x = x;
+	pos.y = y;
+	pos.z = z;
+
+}
 
 extern "C" __global__
 void kernel(
@@ -113,7 +126,7 @@ void kernel(
 	allocator = &_allocator;
 
 	curandStateXORWOW_t thread_random_state;
-	curand_init(grid.thread_rank(), 0, 0, &thread_random_state);
+	curand_init(grid.thread_rank() * uniforms.frameCount, 0, uniforms.frameCount, &thread_random_state);
 
 	{ // clear framebuffer
 		uint64_t clearValue = (uint64_t(Infinity) << 32ull) | uint64_t(BACKGROUND_COLOR);
@@ -178,10 +191,23 @@ void kernel(
 	processRange(MAX_PARTICLES, [&](int index){
 		
 		float age = particles.age[index];
+		float lifetime = particles.lifetime[index];
 
 		if(age < 0.0f) return;
 
-		
+		if(age > lifetime){
+			float3 pos;
+			uint32_t color;
+			float lifetime;
+			float3 velocity;
+			spawnParticle({0.0f, 0.0f, 0.0f}, pos, color, lifetime, velocity, thread_random_state);
+
+			particles.position[index] = pos;
+			particles.color[index] = color;
+			particles.lifetime[index] = lifetime;
+			particles.velocity[index] = velocity;
+			particles.age[index] = 0.0f;
+		}
 
 		float3 velocity = particles.velocity[index];
 		float3 diff = uniforms.deltatime * velocity;
@@ -413,19 +439,26 @@ void kernel(
 	// }
 
 	// draw particles
-	processRange(1'000'000, [&](int index){
+	// processRange(10'000, [&](int index){
 
-		float age = particles.age[index];
+	// 	float age = particles.age[index];
 
-		if(age == -1.0f) return;
+	// 	if(age == -1.0f) return;
 
-		float3 position = particles.position[index];
-		uint32_t color = particles.color[index];
+	// 	float3 position = particles.position[index];
+	// 	uint32_t color = particles.color[index];
 
-		rasterizePoint(fb_points, position, color, 
-			uniforms.transform, uniforms.width, uniforms.height);
+	// 	rasterizePoint(fb_points, position, color, 
+	// 		uniforms.transform, uniforms.width, uniforms.height);
 
-	});
+	// 	// if(uniforms.vrEnabled){
+	// 	// 	rasterizePoint(
+	// 	// 		fb_vr_left, position, color, 
+	// 	// 		uniforms.transform, uniforms.width, uniforms.height
+	// 	// 	);
+	// 	// }
+
+	// });
 
 	grid.sync();
 
@@ -438,7 +471,7 @@ void kernel(
 		int x = pixelID % int(uniforms.width);
 		int y = pixelID / int(uniforms.width);
 
-		int radius = 3;
+		int radius = 1;
 		for(int ox = -radius; ox <= radius; ox++)
 		for(int oy = -radius; oy <= radius; oy++)
 		// for(int ox : {0})

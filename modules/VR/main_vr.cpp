@@ -210,6 +210,22 @@ void resizeFramebuffer(CuFramebuffer& framebuffer, int width, int height){
 
 }
 
+void updatePhysx(shared_ptr<GLRenderer> renderer){
+
+	static double accumulatedTime = 0.0f;
+	double updateEvery = 1.0 / 120.0;
+
+	accumulatedTime += renderer->timeSinceLastFrame;
+
+	while(accumulatedTime > updateEvery){
+
+		// do update for <updateEvery> seconds
+
+		accumulatedTime - updateEvery;
+	}
+
+}
+
 void renderCUDA(shared_ptr<GLRenderer> renderer){
 
 	resizeFramebuffer(framebuffer, renderer->width, renderer->height);
@@ -295,7 +311,7 @@ void initCudaProgram(
 	uint8_t* texture
 ){
 
-	uint64_t bufferSize = 4'000'000'000;
+	uint64_t bufferSize = 2'000'000'000;
 	cuMemAlloc(&cptr_buffer, bufferSize);
 	cuMemsetD8(cptr_buffer, 0, bufferSize); 
 
@@ -416,6 +432,8 @@ int main(){
 
 
 	auto update = [&](){
+
+		updatePhysx(renderer);
 
 		if(ovr->isActive()){
 			ovr->updatePose();
