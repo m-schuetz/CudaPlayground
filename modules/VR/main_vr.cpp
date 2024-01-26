@@ -291,7 +291,7 @@ void initCudaProgram(
 	uint8_t* texture
 ){
 
-	uint64_t bufferSize = 1'000'000'000;
+	uint64_t bufferSize = 4'000'000'000;
 	cuMemAlloc(&cptr_buffer, bufferSize);
 	cuMemsetD8(cptr_buffer, 0, bufferSize); 
 

@@ -246,6 +246,17 @@ struct CudaModularProgram{
 				printf("[%s] max active blocks per SM for blocksize %4i: %2i \n", kernelName.c_str(), blockSize, numBlocks);
 			}
 
+			{
+				int blockSize = 128;
+				int numBlocks;
+				cuOccupancyMaxActiveBlocksPerMultiprocessor(&numBlocks, kernel, blockSize, 0);
+				numBlocks *= numSMs;
+
+				printf("[%s] will launch %i blocks with wize %i => %i threads\n",
+					kernelName.c_str(), numBlocks, blockSize, numBlocks * blockSize
+				);
+			}
+
 			kernels[kernelName] = kernel;
 
 			CUevent event_start, event_end;

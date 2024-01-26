@@ -26,6 +26,37 @@ constexpr float3 gridMax = { 1.0f, 1.0f, 2.0f};
 constexpr float PI = 3.1415;
 constexpr uint32_t BACKGROUND_COLOR = 0x00332211ull;
 
+// struct Particle{
+// 	float3 pos;
+// 	uint32_t color;
+// 	float3 velocity;
+// };
+
+constexpr int MAX_PARTICLES = 10'000'000;
+// Particle particles[MAX_PARTICLES];
+
+// struct{
+// 	float3   position[MAX_PARTICLES];
+// 	uint32_t color[MAX_PARTICLES];
+// 	float    age[MAX_PARTICLES];
+// 	float3   velocity[MAX_PARTICLES];
+// } g_particles;
+
+
+uint32_t SPECTRAL[11] = {
+	0x42019e,
+	0x4f3ed5,
+	0x436df4,
+	0x61aefd,
+	0x8be0fe,
+	0xbfffff,
+	0x98f5e6,
+	0xa4ddab,
+	0xa5c266,
+	0xbd8832,
+	0xa24f5e,
+};
+
 extern "C" __global__
 void kernel(
 	const Uniforms _uniforms,
@@ -65,6 +96,57 @@ void kernel(
 			clearBuffer_u64(fb_vr_right, clearValue, uniforms.vr_right_width * uniforms.vr_right_height);
 		}
 	}
+
+	uint64_t* fb_points = allocator->alloc<uint64_t*>(uniforms.width * uniforms.height * sizeof(uint64_t));
+	{
+		uint64_t clearValue = (uint64_t(Infinity) << 32ull) | uint64_t(0);
+		clearBuffer_u64(fb_points, clearValue, uniforms.width * uniforms.height);
+	}
+
+	struct{
+		float3*   position;
+		uint32_t* color;
+		float*    age;
+		float*    lifetime;
+		float3*   velocity;
+	} particles;
+
+	particles.position = allocator->alloc<float3*  >(MAX_PARTICLES * sizeof(float3));
+	particles.color    = allocator->alloc<uint32_t*>(MAX_PARTICLES * sizeof(uint32_t));
+	particles.age      = allocator->alloc<float*   >(MAX_PARTICLES * sizeof(float));
+	particles.lifetime = allocator->alloc<float*   >(MAX_PARTICLES * sizeof(float));
+	particles.velocity = allocator->alloc<float3*  >(MAX_PARTICLES * sizeof(float3));
+
+
+
+	// clear particles
+	processRange(MAX_PARTICLES, [&](int index){
+		uint32_t X = curand(&thread_random_state) >> 16;
+		uint32_t Y = curand(&thread_random_state) >> 16;
+		uint32_t Z = curand(&thread_random_state) >> 16;
+		uint32_t upper = 1 << 16;
+
+		uint32_t color = curand(&thread_random_state);
+
+		color = SPECTRAL[color % 11];
+
+		float x = 10.0f * (float(X) / float(upper) - 0.5f);
+		float y =  1.0f * (float(Y) / float(upper) - 0.5f) - 0.8f;
+		float z = 10.0f * (float(Z) / float(upper) - 0.5f);
+
+		uint32_t lifetime_ms = curand(&thread_random_state) % 2000 + 1000;
+
+		particles.position[index] = float3{x, y, z};
+		particles.color[index] = color;
+		particles.age[index] = 0.0f;
+		particles.lifetime[index] = float(lifetime_ms) / 1000.0f;
+
+		// g_particles.position[index] = float3{0.0f, 0.0f, 0.0f};
+		// g_particles.color[index] = 0;
+		// g_particles.age[index] = -1.0f;
+		particles.velocity[index] = float3{0.0f, 0.0f, 0.0f};
+	});
+
 
 	g_lines.count = 0;
 
@@ -251,7 +333,81 @@ void kernel(
 		}
 	}
 
-	// grid.sync();
+	grid.sync();
+
+	// draw random points
+	// for(int i = 0; i < 1; i++){
+	// 	uint32_t X = curand(&thread_random_state) >> 16;
+	// 	uint32_t Y = curand(&thread_random_state) >> 16;
+	// 	uint32_t Z = curand(&thread_random_state) >> 16;
+	// 	uint32_t upper = 1 << 16;
+
+	// 	uint32_t color = curand(&thread_random_state);
+
+	// 	color = SPECTRAL[color % 11];
+
+	// 	float x = 10.0f * (float(X) / float(upper) - 0.5f);
+	// 	float y =  1.0f * (float(Y) / float(upper) - 0.5f) - 0.8f;
+	// 	float z = 10.0f * (float(Z) / float(upper) - 0.5f);
+
+	// 	float3 position = {x, y, z};
+
+	// 	rasterizePoint(fb_points, position, color, 
+	// 		uniforms.transform, uniforms.width, uniforms.height);
+
+	// 	// rasterizeSprite(fb_points, position, color, 5,
+	// 	// 	uniforms.transform, uniforms.width, uniforms.height);
+	// }
+
+	// draw particles
+	processRange(1'000'000, [&](int index){
+
+		float age = particles.age[index];
+
+		if(age == -1.0f) return;
+
+		float3 position = particles.position[index];
+		uint32_t color = particles.color[index];
+
+		rasterizePoint(fb_points, position, color, 
+			uniforms.transform, uniforms.width, uniforms.height);
+
+	});
+
+	grid.sync();
+
+	// transfer points to main framebuffer
+	processRange(uniforms.width * uniforms.height, [&](int pixelID){
+
+		// atomicMin(&framebuffer[pixelID], fb_points[pixelID]);
+		uint64_t closest = uint64_t(Infinity) << 32;
+
+		int x = pixelID % int(uniforms.width);
+		int y = pixelID / int(uniforms.width);
+
+		int radius = 3;
+		for(int ox = -radius; ox <= radius; ox++)
+		for(int oy = -radius; oy <= radius; oy++)
+		// for(int ox : {0})
+		// for(int oy : {0})
+		{
+			int px = x + ox;
+			int py = y + oy;
+
+			if(px < 0 || px >= uniforms.width) continue;
+			if(py < 0 || py >= uniforms.width) continue;
+
+			int pid = px + int(uniforms.width) * py;
+
+			uint64_t value = fb_points[pid];
+
+			closest = min(closest, value);
+		}
+
+		atomicMin(&framebuffer[pixelID], closest);
+		// fb_points[pixelID]
+
+	});
 
 	// if(grid.thread_rank() == 0){
 	// 	drawBoundingBox({-2.0f, 0.0f, 0.0f}, {0.5f, 1.0f, 1.5f}, 0x000000ff);
