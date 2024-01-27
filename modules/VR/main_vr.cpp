@@ -31,7 +31,6 @@
 #include "cudamanager/PxCudaContextManager.h"
 #include "extensions/PxRemeshingExt.h"
 #include "extensions/PxParticleExt.h"
-#include "extensions/PxParticleClothCooker.h"
 
 using namespace std;
 
@@ -517,17 +516,6 @@ static void initControllers()
 void initPhysxScene()
 {
 	gMaterial = gPhysics->createMaterial(0.5f, 0.5f, 0.6f);
-
-	// Setup Cloth
-	const PxReal totalInflatableMass = 100.0f;
-
-	PxReal particleSpacing = 0.05f;
-
-	PxArray<PxVec3> vertices;
-	PxArray<PxU32> indices;
-	//float radius = 2;
-	//createSphere(vertices, indices, PxVec3(0, 10, 0), radius, 0.25f);
-	//initInflatable(vertices, indices, particleSpacing, totalInflatableMass);
 
 	initObstacles();
 	initControllers();
