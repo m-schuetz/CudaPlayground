@@ -66,6 +66,20 @@ int sampleMode = SAMPLEMODE_LINEAR;
 bool vrEnabled = false;
 OpenVRHelper* ovr = nullptr;
 
+using namespace physx;
+using namespace ExtGpu;
+
+static PxDefaultAllocator		gAllocator;
+static PxDefaultErrorCallback	gErrorCallback;
+static PxFoundation*			gFoundation = NULL;
+static PxPhysics*				gPhysics	= NULL;
+static PxDefaultCpuDispatcher*	gDispatcher = NULL;
+static PxScene*					gScene		= NULL;
+static PxMaterial*				gMaterial	= NULL;
+static PxPvd*					gPvd        = NULL;
+static PxPBDParticleSystem*		gParticleSystem = NULL;
+static PxParticleClothBuffer*	gUserClothBuffer = NULL;
+
 struct{
 	bool measureLaunchDurations = false;
 } settings;
@@ -263,19 +277,36 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 
 	Uniforms uniforms = getUniforms(renderer);
 
+	void* physx_positions = nullptr;
+	uint32_t physx_numParticles = 0;
+
+	if(gParticleSystem){
+		physx_positions = (void*)gUserClothBuffer->getPositionInvMasses();
+		physx_numParticles = gUserClothBuffer->getNbActiveParticles();
+	}
+
+	void* args_with_phsx[] = {
+		&uniforms, &cptr_buffer, 
+		&output_main, &output_vr_left, &output_vr_right,
+		&framebuffer.cptr, &fb_vr_left.cptr, &fb_vr_right.cptr,
+		&model->numTriangles, &cptr_positions, &cptr_uvs, &cptr_colors,
+		&cptr_texture, &skybox,
+		&physx_positions, &physx_numParticles
+	};
+
 	void* args[] = {
 		&uniforms, &cptr_buffer, 
 		&output_main, &output_vr_left, &output_vr_right,
 		&framebuffer.cptr, &fb_vr_left.cptr, &fb_vr_right.cptr,
 		&model->numTriangles, &cptr_positions, &cptr_uvs, &cptr_colors,
-		&cptr_texture, &skybox
+		&cptr_texture, &skybox,
 	};
 
 	OptionalLaunchSettings launchSettings = {
 		.measureDuration = settings.measureLaunchDurations,
 	};
 
-	cuda_program->launch("kernel", args, launchSettings);
+	cuda_program->launch("kernel", args_with_phsx, launchSettings);
 	cuda_program->launch("kernel_draw_skybox", args, launchSettings);
 	cuda_program->launch("kernel_toOpenGL", args, launchSettings);
 
@@ -334,19 +365,7 @@ void initCudaProgram(
 }
 //
 // PHYSX ===============================================
-using namespace physx;
-using namespace ExtGpu;
 
-static PxDefaultAllocator		gAllocator;
-static PxDefaultErrorCallback	gErrorCallback;
-static PxFoundation*			gFoundation = NULL;
-static PxPhysics*				gPhysics	= NULL;
-static PxDefaultCpuDispatcher*	gDispatcher = NULL;
-static PxScene*					gScene		= NULL;
-static PxMaterial*				gMaterial	= NULL;
-static PxPvd*					gPvd        = NULL;
-static PxPBDParticleSystem*		gParticleSystem = NULL;
-static PxParticleClothBuffer*	gUserClothBuffer = NULL;
 
 PxVec3 cubeVertices[] = { PxVec3(0.5f, -0.5f, -0.5f), PxVec3(0.5f, -0.5f, 0.5f),  PxVec3(-0.5f, -0.5f, 0.5f),  PxVec3(-0.5f, -0.5f, -0.5f),
 	PxVec3(0.5f, 0.5f, -0.5f), PxVec3(0.5f, 0.5f, 0.5f), PxVec3(-0.5f, 0.5f, 0.5f), PxVec3(-0.5f, 0.5f, -0.5f) };

@@ -113,7 +113,9 @@ void kernel(
 	float2* uvs,
 	uint32_t* colors,
 	uint32_t* textureData,
-	const Skybox skybox
+	const Skybox skybox,
+	float4* phsx_positions,
+	const uint32_t physx_numParticles
 ){
 	auto grid = cg::this_grid();
 	auto block = cg::this_thread_block();
@@ -459,6 +461,16 @@ void kernel(
 	// 	// }
 
 	// });
+
+	// DRAW PHYSX PARTICLES
+	processRange(physx_numParticles, [&](int index){
+
+		float4 position = phsx_positions[index];
+		float3 pos3 = make_float3(position);
+
+		rasterizeSprite(framebuffer, pos3, 0x0000ffff, 5, uniforms.transform, uniforms.width, uniforms.height);
+
+	});
 
 	grid.sync();
 
