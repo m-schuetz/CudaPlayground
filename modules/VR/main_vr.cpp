@@ -321,8 +321,6 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 	cuGraphicsUnregisterResource(cugl_main);
 	cuGraphicsUnregisterResource(cugl_vr_left);
 	cuGraphicsUnregisterResource(cugl_vr_right);
-
-
 }
 
 void initCudaProgram(
@@ -646,6 +644,21 @@ void handlePhysicsInputs(PxReal dt)
 			animateActorToTarget(gControllerBodies[controllerId], targetPositions[targetPosIdController], dt);
 		}
 	}
+
+	// doesn't work like this. raises error, probably because the buffer is read-only
+	// printf("before\n");
+	// PxVec4* positionsInvMasses = gParticleBuffer->getPositionInvMasses();
+	// uint32_t numParticlesToMove = gParticleBuffer->getNbActiveParticles() / 10;
+	// for (PxU32 i = 0; i < numParticlesToMove; ++i)
+	// {
+	// 	auto moveParticleId = std::rand() % gParticleBuffer->getNbActiveParticles();
+	// 	PxTransform targetPose = gControllerBodies[0]->getGlobalPose();
+	// 	printf("try to set particle\n");
+	// 	positionsInvMasses[moveParticleId].x = targetPose.p.x;
+	// 	positionsInvMasses[moveParticleId].y = targetPose.p.y;
+	// 	positionsInvMasses[moveParticleId].z = targetPose.p.z;
+	// }
+	// printf("after\n");
 }
 
 void updatePhysx(shared_ptr<GLRenderer> renderer) 
