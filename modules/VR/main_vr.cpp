@@ -628,8 +628,8 @@ void onBeforeRenderParticles()
 	}
 }
 
-void updatePhysx(shared_ptr<GLRenderer> renderer) {
-
+void updatePhysx(shared_ptr<GLRenderer> renderer) 
+{
 	onBeforeRenderParticles();
 
 	static double accumulatedTime = 0.0f;
@@ -645,7 +645,7 @@ void updatePhysx(shared_ptr<GLRenderer> renderer) {
 		gScene->fetchResults(true);
 		gScene->fetchResultsParticleSystem();
 
-		accumulatedTime - updateEvery;
+		accumulatedTime -= updateEvery;
 	}
 
 }
