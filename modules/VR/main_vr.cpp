@@ -648,14 +648,15 @@ void animateActorToTarget(PxRigidDynamic* actor, const PxVec3& targetPos, const 
 void handlePhysicsInputs(PxReal dt)
 {
 	float dist = 4.0f;
+	float height = -0.3f;
 	std::vector<PxVec3> targetPositions =
 	{
-			PxVec3(0.0f, 0.5f, 0.0f),
-			PxVec3(-dist, 0.5f, 0.0f),
-			PxVec3(-dist, 0.5f, -dist),
-			PxVec3(0.0f, 0.5f, -dist),
-			PxVec3(0.0f, 0.5f, -dist),
-			PxVec3(dist, 0.5f, -dist)
+			PxVec3(0.0f, height, 0.0f),
+			PxVec3(-dist, height, -dist),
+			PxVec3(dist, height, dist),
+			PxVec3(0.0f, height, -dist),
+			PxVec3(0.0f, height, -dist),
+			PxVec3(dist, height, -dist)
 	};
 	static uint32_t targetPosId = 0;
 	static PxReal dtAccu = 0;
@@ -671,26 +672,44 @@ void handlePhysicsInputs(PxReal dt)
 	{
 		if (gControllerBodies[controllerId])
 		{	
-			// TODO: use actual controller position
 			uint32_t targetPosIdController = targetPosId + controllerId % targetPositions.size();
 			animateActorToTarget(gControllerBodies[controllerId], targetPositions[targetPosIdController], dt);
 		}
 	}
 
-	// doesn't work like this. raises error, probably because the buffer is read-only
-	// printf("before\n");
-	// PxVec4* positionsInvMasses = gParticleBuffer->getPositionInvMasses();
-	// uint32_t numParticlesToMove = gParticleBuffer->getNbActiveParticles() / 10;
-	// for (PxU32 i = 0; i < numParticlesToMove; ++i)
-	// {
-	// 	auto moveParticleId = std::rand() % gParticleBuffer->getNbActiveParticles();
-	// 	PxTransform targetPose = gControllerBodies[0]->getGlobalPose();
-	// 	printf("try to set particle\n");
-	// 	positionsInvMasses[moveParticleId].x = targetPose.p.x;
-	// 	positionsInvMasses[moveParticleId].y = targetPose.p.y;
-	// 	positionsInvMasses[moveParticleId].z = targetPose.p.z;
-	// }
-	// printf("after\n");
+	/*
+	PxCudaContextManager* cudaContextManager = gScene->getCudaContextManager();
+	cudaContextManager->acquireContext();
+
+	PxU32 numActiveParticles = gParticleBuffer->getNbActiveParticles();
+	PxVec4* posInvMass = gParticleBuffer->getPositionInvMasses();
+	PxVec4* velocities = gParticleBuffer->getVelocities();
+
+	// TODO: try PxVec4* posInvMassHost = cudaContextManager->allocPinnedHostBuffer<PxVec4>(numActiveParticles);
+	PxVec4* posInvMassHost = new PxVec4[numActiveParticles];
+
+	PxCudaContext* cudaContext = cudaContextManager->getCudaContext();
+	cudaContext->memcpyDtoH(posInvMassHost, CUdeviceptr(posInvMass), numActiveParticles * sizeof(PxVec4));
+
+	static PxReal particlesAccu = 0.0f;
+	static PxReal particlesPerSecond = 500.0f;
+	particlesAccu += particlesPerSecond * dt;
+	uint32_t particlesThisStep = int(particlesAccu);
+	for (PxU32 i = 0; i < particlesThisStep; ++i)
+	{
+		particlesAccu -= 1.0f;
+		auto moveParticleId = std::rand() % gParticleBuffer->getNbActiveParticles();
+		PxTransform targetPose = gControllerBodies[0]->getGlobalPose();
+		//printf("try to set particle\n");
+		posInvMassHost[moveParticleId].x = targetPose.p.x;
+		posInvMassHost[moveParticleId].y = targetPose.p.y;
+		posInvMassHost[moveParticleId].z = targetPose.p.z;
+	}
+
+	cudaContext->memcpyHtoDAsync(CUdeviceptr(posInvMass), posInvMassHost, numActiveParticles * sizeof(PxVec4), 0);
+	cudaContext->streamSynchronize(0);
+	cudaContextManager->releaseContext();
+	*/
 }
 
 void updatePhysx(shared_ptr<GLRenderer> renderer) 
@@ -713,20 +732,6 @@ void updatePhysx(shared_ptr<GLRenderer> renderer)
 
 		accumulatedTime -= updateEvery;
 	}
-
-}
-
-void allocParticleBuffers()
-{
-	PxScene* scene;
-	PxGetPhysics().getScenes(&scene, 1);
-	PxCudaContextManager* cudaContextManager = scene->getCudaContextManager();
-
-	PxU32 maxParticles = gParticleBuffer->getMaxParticles();
-
-	// TODO: replace with own buffer
-	// sPosBuffer.initialize(cudaContextManager);
-	// sPosBuffer.allocate(maxParticles * sizeof(PxVec4));
 
 }
 
@@ -762,8 +767,6 @@ void cleanupPhysics(bool /*interactive*/)
 int main(){
 
 	initPhysx();
-
-	
 
 	cout << std::setprecision(2) << std::fixed;
 	setlocale( LC_ALL, "en_AT.UTF-8" );
