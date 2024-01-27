@@ -16,6 +16,7 @@
 #include "GLRenderer.h"
 #include "cudaGL.h"
 // #include "builtin_types.h"
+#include <glm/gtx/matrix_decompose.hpp>
 
 #include "unsuck.hpp"
 #include "ObjLoader.h"
@@ -561,7 +562,8 @@ void initPhysxScene()
 
 	PxArray<PxVec3> vertices;
 	PxArray<PxU32> indices;
-	createSphere(vertices, indices, PxVec3(0, 10, 0), 3, 0.25f);
+	float radius = 2;
+	createSphere(vertices, indices, PxVec3(0, 10, 0), radius, 0.25f);
 	initInflatable(vertices, indices, particleSpacing, totalInflatableMass);
 
 	initObstacles();
@@ -643,7 +645,39 @@ void onBeforeRenderParticles()
 
 void updateActor(PxRigidDynamic* actor, PxTransform targetPose)
 {
-	actor->setKinematicTarget(targetPose);
+
+	if (ovr && ovr->isActive() && ovr->getLeftControllerPose().valid) {
+		// Pose poseLeft = ovr->getLeftControllerPose();
+		Pose pose = ovr->getLeftControllerPose();
+
+		//PxTransform phsyxPose;
+		glm::mat4 transform = pose.transform;
+
+		// glm::dvec3 worldPos = ...;
+		// glm::quat rot = glm::quat_cast(transform);
+
+		glm::vec3 scale;
+		glm::quat rotation;
+		glm::vec3 translation;
+		glm::vec3 skew;
+		glm::vec4 perspective;
+		glm::decompose(transform, scale, rotation, translation, skew, perspective);
+
+
+		auto physx_world = PxVec3(translation.x, translation.y, translation.z);
+		auto physx_rot   = PxQuat(rotation.x, rotation.y, rotation.z, rotation.w);
+		
+		PxTransform phsyxPose(physx_world, physx_rot);
+
+		// memcpy(&uniforms.vr_right_controller_pose, &transform, sizeof(transform));
+
+		actor->setKinematicTarget(phsyxPose);
+		
+	} else {
+		actor->setKinematicTarget(targetPose);
+	}
+
+
 }
 
 void animateActorToTarget(PxRigidDynamic* actor, const PxVec3& targetPos, const PxReal dt)

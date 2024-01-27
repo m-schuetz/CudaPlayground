@@ -16,6 +16,8 @@
 
 namespace cg = cooperative_groups;
 
+constexpr bool PARTICLES_ENABLED = false;
+
 
 constexpr bool EDL_ENABLED = false;
 constexpr uint32_t gridSize = 128;
@@ -32,7 +34,7 @@ constexpr uint32_t BACKGROUND_COLOR = 0x00332211ull;
 // 	float3 velocity;
 // };
 
-constexpr int MAX_PARTICLES = 10'000'000;
+constexpr int MAX_PARTICLES = 100'000;
 // Particle particles[MAX_PARTICLES];
 
 // struct{
@@ -58,7 +60,7 @@ uint32_t SPECTRAL[11] = {
 };
 
 void spawnParticle(
-	float3 origin,
+	float3 origin, float3 dir, 
 	float3& pos, uint32_t& color, float& lifetime, float3& velocity, 
 	curandStateXORWOW_t& thread_random_state
 ){
@@ -71,24 +73,34 @@ void spawnParticle(
 	uint32_t vX = curand(&thread_random_state) % 1000;
 	uint32_t vY = curand(&thread_random_state) % 1000;
 	uint32_t vZ = curand(&thread_random_state) % 1000;
+	// uint32_t vZ = curand(&thread_random_state) % 1000;
+
+	uint32_t ispeed = curand(&thread_random_state) % 2000 + 1000;
+	float speed = float(ispeed) * 0.001f;
 	
 	velocity = {
 		float(vX) / 1000.0f - 0.5f,
-		float(vY) / 1000.0f ,
+		float(vY) / 1000.0f - 0.5f,
 		float(vZ) / 1000.0f - 0.5f,
 	};
 
-	uint32_t colorID = curand(&thread_random_state);
+	velocity = normalize(velocity) * speed;
 
+	velocity = dir + 0.1f * velocity;
+
+
+
+	// velocity.x *= 0.1f;
+
+	uint32_t colorID = curand(&thread_random_state);
 	color = SPECTRAL[colorID % 11];
 
-	float x = origin.x + 10.0f * (float(X) / float(upper) - 0.5f);
-	float y = origin.y +  1.0f * (float(Y) / float(upper) - 0.5f);
-	float z = origin.z + 10.0f * (float(Z) / float(upper) - 0.5f);
+	float x = origin.x; // +  0.1f * (float(X) / float(upper) - 0.5f);
+	float y = origin.y; // +  0.1f * (float(Y) / float(upper) - 0.5f);
+	float z = origin.z; // +  0.1f * (float(Z) / float(upper) - 0.5f);
 
-	uint32_t lifetime_ms = curand(&thread_random_state) % 15000 + 100;
-	uint32_t ispeed = curand(&thread_random_state) % 2000 + 1000;
-	float speed = float(ispeed) * 0.001f;
+	uint32_t lifetime_ms = curand(&thread_random_state) % 4000 + 100;
+	
 
 	lifetime = log2f(float(lifetime_ms) * 0.001f);
 
@@ -140,10 +152,18 @@ void kernel(
 		}
 	}
 
-	uint64_t* fb_points = allocator->alloc<uint64_t*>(uniforms.width * uniforms.height * sizeof(uint64_t));
+	uint64_t* fb_points          = allocator->alloc<uint64_t*>(uniforms.width * uniforms.height * sizeof(uint64_t));
+	uint64_t* fb_points_vr_left  = allocator->alloc<uint64_t*>(uniforms.vr_left_width * uniforms.vr_left_height * sizeof(uint64_t));
+	uint64_t* fb_points_vr_right = allocator->alloc<uint64_t*>(uniforms.vr_right_width * uniforms.vr_right_height * sizeof(uint64_t));
 	{
 		uint64_t clearValue = (uint64_t(Infinity) << 32ull) | uint64_t(0);
-		clearBuffer_u64(fb_points, clearValue, uniforms.width * uniforms.height);
+
+		if(uniforms.vrEnabled){
+			clearBuffer_u64(fb_points_vr_left, clearValue, uniforms.vr_left_width * uniforms.vr_left_height);
+			clearBuffer_u64(fb_points_vr_right, clearValue, uniforms.vr_right_width * uniforms.vr_right_height);
+		}else{
+			clearBuffer_u64(fb_points, clearValue, uniforms.width * uniforms.height);
+		}
 	}
 
 	struct{
@@ -163,6 +183,7 @@ void kernel(
 
 
 	// clear/reset particles
+	if(PARTICLES_ENABLED)
 	if(uniforms.frameCount == 0)
 	processRange(MAX_PARTICLES, [&](int index){
 		uint32_t X = curand(&thread_random_state) >> 16;
@@ -189,26 +210,87 @@ void kernel(
 		particles.velocity[index] = float3{0.0f, speed, 0.0f};
 	});
 
+	grid.sync();
+
+	float3 particleOrigin_0 = {0.0f, 0.0f, 0.0f};
+	float3 particleDir_0 = {0.0f, 0.0f, -1.0f};
+	uint32_t particleColor_0 = 0;
+
+	float3 particleOrigin_1 = {0.0f, 0.0f, 0.0f};
+	float3 particleDir_1 = {0.0f, 0.0f, -1.0f};
+	uint32_t particleColor_1 = 0;
+
+	if(uniforms.vrEnabled){
+		if(uniforms.vr_right_controller_active){
+			float4 p0 = uniforms.vr_right_controller_pose.transpose() * float4{0.0f, 0.0f, -0.0f, 1.0f};
+			float4 p1 = uniforms.vr_right_controller_pose.transpose() * float4{0.0f, 0.005f, -0.025f, 1.0f};
+			
+			particleOrigin_1 = make_float3(p1);
+			particleDir_1 = normalize(make_float3(p1) - make_float3(p0));
+			particleColor_1 = SPECTRAL[curand(&thread_random_state) % 11];
+		}
+		
+		if(uniforms.vr_left_controller_active){
+			float4 p0 = uniforms.vr_left_controller_pose.transpose() * float4{0.0f, 0.0f, -0.0f, 1.0f};
+			float4 p1 = uniforms.vr_left_controller_pose.transpose() * float4{0.0f, 0.0f, -0.1f, 1.0f};
+			
+			particleOrigin_0 = make_float3(p1);
+			particleDir_0 = normalize(make_float3(p1) - make_float3(p0));
+			particleColor_0 = SPECTRAL[curand(&thread_random_state) % 11];
+		}
+	}
+
+	// grid.sync();
+
+	// if(grid.thread_rank() == 0){
+	// 	printf("%.1f, %.1f, %.1f \n", particleOrigin.x, particleOrigin.y, particleOrigin.z);
+	// }
+
+	grid.sync();
+
 	// update particles
+	if(PARTICLES_ENABLED)
 	processRange(MAX_PARTICLES, [&](int index){
 		
 		float age = particles.age[index];
 		float lifetime = particles.lifetime[index];
 
-		if(age < 0.0f) return;
-
-		if(age > lifetime){
+		if(age > lifetime || age < 0.0f){
 			float3 pos;
-			uint32_t color;
 			float lifetime;
 			float3 velocity;
-			spawnParticle({0.0f, 0.0f, 0.0f}, pos, color, lifetime, velocity, thread_random_state);
+
+			uint64_t triggerMask = 1ull << 33ull;
+			bool leftTriggerButtonDown = (uniforms.vr_left_controller_state.buttonPressedMask & triggerMask) != 0;
+			bool rightTriggerButtonDown = (uniforms.vr_right_controller_state.buttonPressedMask & triggerMask) != 0;
+
+
+			uint32_t color = 0;
+			float age = -1.0f;
+			if(index % 2 == 0 && uniforms.vr_left_controller_active && leftTriggerButtonDown){
+				spawnParticle(particleOrigin_0, particleDir_0,
+					pos, color, lifetime, velocity, thread_random_state);
+				color = SPECTRAL[curand(&thread_random_state) % 11] / 2;
+				age = 0.0f;
+			}else if(index % 2 == 1 && uniforms.vr_right_controller_active && rightTriggerButtonDown){
+				spawnParticle(particleOrigin_1, particleDir_1,
+					pos, color, lifetime, velocity, thread_random_state);
+				color = SPECTRAL[curand(&thread_random_state) % 11];
+				age = 0.0f;
+			}
+			
+			if(!uniforms.vrEnabled){
+				spawnParticle({0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, -1.0f},
+					pos, color, lifetime, velocity, thread_random_state);
+				particleColor_0 = SPECTRAL[curand(&thread_random_state) % 11];
+				age = 0.0f;
+			}
 
 			particles.position[index] = pos;
-			particles.color[index] = color;
+			particles.color[index]    = color;
 			particles.lifetime[index] = lifetime;
 			particles.velocity[index] = velocity;
-			particles.age[index] = 0.0f;
+			particles.age[index]      = age;
 		}
 
 		float3 velocity = particles.velocity[index];
@@ -216,16 +298,6 @@ void kernel(
 
 		particles.position[index] += diff;
 		particles.age[index] += uniforms.deltatime;
-
-		// particles.position[index] = float3{x, y, z};
-		// particles.color[index] = color;
-		// particles.age[index] = 0.0f;
-		// particles.lifetime[index] = float(lifetime_ms) / 1000.0f;
-
-		// g_particles.position[index] = float3{0.0f, 0.0f, 0.0f};
-		// g_particles.color[index] = 0;
-		// g_particles.age[index] = -1.0f;
-		// particles.velocity[index] = float3{0.0f, 0.0f, 0.0f};
 	});
 
 
@@ -285,73 +357,72 @@ void kernel(
 
 	grid.sync();
 
-	{
-		Triangles* sphere = createSphere(24);
+	// if(false)
+	// {
+	// 	Triangles* sphere = createSphere(24);
+	// 	for(int i = 0; i <= 10; i++)
+	// 	for(int j = -10; j <= 10; j += 2)
+	// 	// for(int j : {0, 1, 2})
+	// 	// for(int i : {1})
+	// 	// for(int j : {-5})
+	// 	{
+	// 		// uint32_t X = curand(&thread_random_state) >> 16;
+	// 		// uint32_t Y = curand(&thread_random_state) >> 16;
+	// 		// uint32_t Z = curand(&thread_random_state) >> 16;
+	// 		// uint32_t upper = 1 << 16;
 
+	// 		// float x = float(X) / float(upper) - 0.5f;
+	// 		// float y = float(Y) / float(upper) - 0.5f;
+	// 		// float z = float(Z) / float(upper) - 0.5f;
 
-		for(int i = 0; i <= 10; i++)
-		for(int j = -10; j <= 10; j += 2)
-		// for(int j : {0, 1, 2})
-		// for(int i : {1})
-		// for(int j : {-5})
-		{
-			// uint32_t X = curand(&thread_random_state) >> 16;
-			// uint32_t Y = curand(&thread_random_state) >> 16;
-			// uint32_t Z = curand(&thread_random_state) >> 16;
-			// uint32_t upper = 1 << 16;
+	// 		float x = i - 5;
 
-			// float x = float(X) / float(upper) - 0.5f;
-			// float y = float(Y) / float(upper) - 0.5f;
-			// float z = float(Z) / float(upper) - 0.5f;
-
-			float x = i - 5;
-
-			rs_main.texture = nullptr;
-			rs_main.colorMode = COLORMODE_UV;
-			rs_main.world = mat4::translate(x, -j - 1.0f, -0.3f) * mat4::scale(0.2f, 0.2f, 0.2f);
+	// 		rs_main.texture = nullptr;
+	// 		rs_main.colorMode = COLORMODE_UV;
+	// 		rs_main.world = mat4::translate(x, -j - 1.0f, -0.3f) * mat4::scale(0.2f, 0.2f, 0.2f);
 			
 
-			if(uniforms.vrEnabled){
-				RasterizationSettings rs_left;
-				rs_left.texture   = nullptr;
-				rs_left.colorMode = COLORMODE_UV;
-				rs_left.world     = mat4::translate(x, -j - 1.0f, -0.3f) * mat4::scale(0.2f, 0.2f, 0.2f);
-				rs_left.view      = uniforms.vr_left_view;
-				rs_left.proj      = uniforms.vr_left_proj;
-				rs_left.transform = uniforms.vr_left_transform;
-				rs_left.width     = uniforms.vr_left_width;
-				rs_left.height    = uniforms.vr_left_height;
+	// 		if(uniforms.vrEnabled){
+	// 			RasterizationSettings rs_left;
+	// 			rs_left.texture   = nullptr;
+	// 			rs_left.colorMode = COLORMODE_UV;
+	// 			rs_left.world     = mat4::translate(x, -j - 1.0f, -0.3f) * mat4::scale(0.2f, 0.2f, 0.2f);
+	// 			rs_left.view      = uniforms.vr_left_view;
+	// 			rs_left.proj      = uniforms.vr_left_proj;
+	// 			rs_left.transform = uniforms.vr_left_transform;
+	// 			rs_left.width     = uniforms.vr_left_width;
+	// 			rs_left.height    = uniforms.vr_left_height;
 				
-				rasterizeTriangles(sphere, fb_vr_left, rs_left);
-				grid.sync();
+	// 			rasterizeTriangles(sphere, fb_vr_left, rs_left);
+	// 			grid.sync();
 
-				RasterizationSettings rs_right;
-				rs_right.texture   = nullptr;
-				rs_right.colorMode = COLORMODE_VERTEXCOLOR;
-				rs_right.world     = mat4::translate(x, -j - 1.0f, -0.3f) * mat4::scale(0.2f, 0.2f, 0.2f);
-				rs_right.view      = uniforms.vr_right_view;
-				rs_right.proj      = uniforms.vr_right_proj;
-				rs_right.transform = uniforms.vr_right_transform;
-				rs_right.width     = uniforms.vr_right_width;
-				rs_right.height    = uniforms.vr_right_height;
-				rasterizeTriangles(sphere, fb_vr_right, rs_right);
+	// 			RasterizationSettings rs_right;
+	// 			rs_right.texture   = nullptr;
+	// 			rs_right.colorMode = COLORMODE_VERTEXCOLOR;
+	// 			rs_right.world     = mat4::translate(x, -j - 1.0f, -0.3f) * mat4::scale(0.2f, 0.2f, 0.2f);
+	// 			rs_right.view      = uniforms.vr_right_view;
+	// 			rs_right.proj      = uniforms.vr_right_proj;
+	// 			rs_right.transform = uniforms.vr_right_transform;
+	// 			rs_right.width     = uniforms.vr_right_width;
+	// 			rs_right.height    = uniforms.vr_right_height;
+	// 			rasterizeTriangles(sphere, fb_vr_right, rs_right);
 
-				// mat4 transform = uniforms.vr_right_transform;
-				// // mat4 transform = uniforms.vr_right_proj * uniforms.vr_right_view;
-				// float3 position = {x, -0.3f, -j - 1.0f};
-				// rasterizeSprite(fb_vr_right, position, 0x000000ff, 10, transform, uniforms.vr_right_width, uniforms.vr_right_height);
+	// 			// mat4 transform = uniforms.vr_right_transform;
+	// 			// // mat4 transform = uniforms.vr_right_proj * uniforms.vr_right_view;
+	// 			// float3 position = {x, -0.3f, -j - 1.0f};
+	// 			// rasterizeSprite(fb_vr_right, position, 0x000000ff, 10, transform, uniforms.vr_right_width, uniforms.vr_right_height);
 
-				grid.sync();
-			}else{
-				// rasterizeTriangles(sphere, framebuffer, rs_main);
-				float3 position = {x, -0.3f, -j - 1.0f};
-				if(grid.thread_rank() == 0)
-				rasterizeSprite(framebuffer, position, 0x000000ff, 10, uniforms.transform, uniforms.width, uniforms.height);
-			}
+	// 			grid.sync();
+	// 		}else{
+	// 			// rasterizeTriangles(sphere, framebuffer, rs_main);
+	// 			float3 position = {x, -0.3f, -j - 1.0f};
+	// 			if(grid.thread_rank() == 0)
+	// 			rasterizeSprite(framebuffer, position, 0x000000ff, 10, uniforms.transform, uniforms.width, uniforms.height);
+	// 		}
 
-			grid.sync();
-		}
-	}
+	// 		grid.sync();
+	// 	}
+	// }
 
 	grid.sync();
 
@@ -441,26 +512,44 @@ void kernel(
 	// }
 
 	// draw particles
-	// processRange(10'000, [&](int index){
+	if(PARTICLES_ENABLED)
+	processRange(100'000, [&](int index){
 
-	// 	float age = particles.age[index];
+		float age = particles.age[index];
 
-	// 	if(age == -1.0f) return;
+		if(age < 0.0f) return;
 
-	// 	float3 position = particles.position[index];
-	// 	uint32_t color = particles.color[index];
+		float3 position = particles.position[index];
+		uint32_t color = particles.color[index];
 
-	// 	rasterizePoint(fb_points, position, color, 
-	// 		uniforms.transform, uniforms.width, uniforms.height);
+		
 
-	// 	// if(uniforms.vrEnabled){
-	// 	// 	rasterizePoint(
-	// 	// 		fb_vr_left, position, color, 
-	// 	// 		uniforms.transform, uniforms.width, uniforms.height
-	// 	// 	);
-	// 	// }
+		if(uniforms.vrEnabled){
+			rasterizePoint(
+				fb_points_vr_left, position, color, 
+				uniforms.vr_left_transform, uniforms.vr_left_width, uniforms.vr_left_height
+			);
 
-	// });
+			rasterizePoint(
+				fb_points_vr_right, position, color, 
+				uniforms.vr_right_transform, uniforms.vr_right_width, uniforms.vr_right_height
+			);
+
+			// rasterizeSprite(
+			// 	fb_vr_left, position, color, 10,
+			// 	uniforms.vr_left_transform, uniforms.vr_left_width, uniforms.vr_left_height
+			// );
+
+			// rasterizeSprite(
+			// 	fb_vr_right, position, color, 10,
+			// 	uniforms.vr_right_transform, uniforms.vr_right_width, uniforms.vr_right_height
+			// );
+		}else{
+			rasterizePoint(fb_points, position, color, 
+				uniforms.transform, uniforms.width, uniforms.height);
+		}
+
+	});
 
 	// DRAW PHYSX PARTICLES
 	processRange(physx_numParticles, [&](int index){
@@ -469,6 +558,18 @@ void kernel(
 		float3 pos3 = make_float3(position);
 
 		rasterizeSprite(framebuffer, pos3, 0x0000ffff, 5, uniforms.transform, uniforms.width, uniforms.height);
+
+		if(uniforms.vrEnabled){
+			rasterizeSprite(
+				fb_vr_left, pos3, 0x0000ffff, 10,
+				uniforms.vr_left_transform, uniforms.vr_left_width, uniforms.vr_left_height
+			);
+
+			rasterizeSprite(
+				fb_vr_right, pos3, 0x0000ffff, 10,
+				uniforms.vr_right_transform, uniforms.vr_right_width, uniforms.vr_right_height
+			);
+		}
 
 	});
 
@@ -503,8 +604,64 @@ void kernel(
 		}
 
 		atomicMin(&framebuffer[pixelID], closest);
-		// fb_points[pixelID]
+	});
 
+	if(uniforms.vrEnabled)
+	processRange(uniforms.vr_left_width * uniforms.vr_left_height, [&](int pixelID){
+
+		// atomicMin(&framebuffer[pixelID], fb_points[pixelID]);
+		uint64_t closest = uint64_t(Infinity) << 32;
+
+		int x = pixelID % int(uniforms.vr_left_width);
+		int y = pixelID / int(uniforms.vr_left_width);
+
+		int radius = 3;
+		for(int ox = -radius; ox <= radius; ox++)
+		for(int oy = -radius; oy <= radius; oy++)
+		{
+			int px = x + ox;
+			int py = y + oy;
+
+			if(px < 0 || px >= uniforms.vr_left_width) continue;
+			if(py < 0 || py >= uniforms.vr_left_width) continue;
+
+			int pid = px + int(uniforms.vr_left_width) * py;
+
+			uint64_t value = fb_points_vr_left[pid];
+
+			closest = min(closest, value);
+		}
+
+		atomicMin(&fb_vr_left[pixelID], closest);
+	});
+
+	if(uniforms.vrEnabled)
+	processRange(uniforms.vr_right_width * uniforms.vr_right_height, [&](int pixelID){
+
+		// atomicMin(&framebuffer[pixelID], fb_points[pixelID]);
+		uint64_t closest = uint64_t(Infinity) << 32;
+
+		int x = pixelID % int(uniforms.vr_right_width);
+		int y = pixelID / int(uniforms.vr_right_width);
+
+		int radius = 3;
+		for(int ox = -radius; ox <= radius; ox++)
+		for(int oy = -radius; oy <= radius; oy++)
+		{
+			int px = x + ox;
+			int py = y + oy;
+
+			if(px < 0 || px >= uniforms.vr_right_width) continue;
+			if(py < 0 || py >= uniforms.vr_right_width) continue;
+
+			int pid = px + int(uniforms.vr_right_width) * py;
+
+			uint64_t value = fb_points_vr_right[pid];
+
+			closest = min(closest, value);
+		}
+
+		atomicMin(&fb_vr_right[pixelID], closest);
 	});
 
 	// if(grid.thread_rank() == 0){
