@@ -750,9 +750,9 @@ void kernel(
 		// dir.z = -dir.z;
 		for(int particleIndex = 0; particleIndex < 500; particleIndex++){
 			float3 spherePos = {
-				phsx_positions[particleIndex].x,
-				phsx_positions[particleIndex].z,
-				phsx_positions[particleIndex].y,
+				phsx_positions[1234 * particleIndex % physx_numParticles].x,
+				phsx_positions[1234 * particleIndex % physx_numParticles].z,
+				phsx_positions[1234 * particleIndex % physx_numParticles].y,
 			};
 			float t = raySphereIntersection(origin, dir, spherePos, 0.037f);
 
