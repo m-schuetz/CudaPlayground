@@ -106,6 +106,7 @@ struct CudaModule{
 
 struct OptionalLaunchSettings{
 	bool measureDuration = false;
+	int blockSize = 128;
 };
 
 struct CudaModularProgram{
@@ -289,7 +290,7 @@ struct CudaModularProgram{
 		cuCtxGetDevice(&device);
 		cuDeviceGetAttribute(&numSMs, CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, device);
 
-		int blockSize = 128;
+		int blockSize = launchArgs.blockSize;
 		int numBlocks;
 		CUresult resultcode = cuOccupancyMaxActiveBlocksPerMultiprocessor(&numBlocks, kernels["kernel"], blockSize, 0);
 		numBlocks *= numSMs;

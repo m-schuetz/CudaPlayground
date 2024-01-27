@@ -308,7 +308,7 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 		.measureDuration = settings.measureLaunchDurations,
 	};
 
-	cuda_program->launch("kernel", args_with_phsx, launchSettings);
+	cuda_program->launch("kernel", args_with_phsx, {.blockSize = 256});
 	cuda_program->launch("kernel_draw_skybox", args, launchSettings);
 	cuda_program->launch("kernel_toOpenGL", args, launchSettings);
 
@@ -524,7 +524,11 @@ void initPhysxScene()
 	bool useLargeFluid = false;
 	const PxReal fluidDensity = 1000.0f;
 	const PxU32 maxDiffuseParticles = useLargeFluid ? 2'000'000 : 100'000;
-	initParticles(50, 120 * (useLargeFluid ? 5 : 1), 30, PxVec3(-2.5f, 3.f, 0.5f), 0.1f, fluidDensity, maxDiffuseParticles);
+	initParticles(
+		50 / 2, 
+		120 * (useLargeFluid ? 5 : 1) / 2, 
+		30 / 2, 
+		PxVec3(-2.5f, 3.f, 0.5f), 0.1f, fluidDensity, maxDiffuseParticles);
 
 	// Setup rigid bodies
 	// const PxReal boxSize = 0.75f;

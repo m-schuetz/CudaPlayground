@@ -289,3 +289,25 @@ bool intersectsFrustum(mat4 worldViewProj, float3 wgMin, float3 wgMax){
 
 	return true;
 }
+
+// from three.js
+// https://github.com/mrdoob/three.js/blob/dev/src/math/Ray.js
+// License: MIT (https://github.com/mrdoob/three.js/blob/dev/LICENSE)
+float raySphereIntersection(float3 origin, float3 dir, float3 spherePos, float radius) {
+
+	float3 origToSphere = spherePos - origin;
+	float tca = dot(origToSphere, dir);
+	float d2 = dot(origToSphere, origToSphere) - tca * tca;
+	float radius2 = radius * radius;
+
+	if(d2 > radius2) return -1.0f;
+
+	float thc = sqrt(radius2 - d2);
+	float t0 = tca - thc;
+	float t1 = tca + thc;
+
+	if(t1 < 0) return -1.0f;
+	if(t0 < 0) return t1;
+
+	return t0;
+}
