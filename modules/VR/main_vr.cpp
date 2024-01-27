@@ -78,6 +78,7 @@ static PxScene*					gScene		= NULL;
 static PxMaterial*				gMaterial	= NULL;
 static PxPBDParticleSystem*		gParticleSystem = NULL;
 static PxParticleClothBuffer*	gUserClothBuffer = NULL;
+static PxRigidDynamic* gControllerBodies[2] = { NULL, NULL };
 
 struct{
 	bool measureLaunchDurations = false;
@@ -526,19 +527,27 @@ static void initInflatable(PxArray<PxVec3>& verts, PxArray<PxU32>& indices, cons
 
 static void initObstacles()
 {
-	PxShape* shape = gPhysics->createShape(PxCapsuleGeometry(0.5f, 4.f), *gMaterial);
-	PxRigidDynamic* body = gPhysics->createRigidDynamic(PxTransform(PxVec3(0.f, 5.0f, 2.f)));
-	body->attachShape(*shape);
-	body->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, true);
-	gScene->addActor(*body);
-	shape->release();
+	const float playgroundSize = 5.0f;
+	gScene->addActor(*PxCreatePlane(*gPhysics, PxPlane(0.f, 1.f, 0.f, 0.5f), *gMaterial));  // ground plane
+	gScene->addActor(*PxCreatePlane(*gPhysics, PxPlane(0.f, -1.f, 0.f, 100.0f), *gMaterial));  // sky plane
+	gScene->addActor(*PxCreatePlane(*gPhysics, PxPlane(1.f, 0.f, 0.f, playgroundSize), *gMaterial));  // x plane
+	gScene->addActor(*PxCreatePlane(*gPhysics, PxPlane(-1.f, 0.f, 0.f, playgroundSize), *gMaterial));  // -x plane
+	gScene->addActor(*PxCreatePlane(*gPhysics, PxPlane(0.f, 0.f, 1.f, playgroundSize), *gMaterial));  // z plane
+	gScene->addActor(*PxCreatePlane(*gPhysics, PxPlane(0.f, 0.f, -1.f, playgroundSize), *gMaterial));  // -z plane
+}
 
-	shape = gPhysics->createShape(PxCapsuleGeometry(0.5f, 4.f), *gMaterial);
-	body = gPhysics->createRigidDynamic(PxTransform(PxVec3(0.f, 5.0f, -2.f)));
-	body->attachShape(*shape);
-	body->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, true);
-	gScene->addActor(*body);
-	shape->release();
+static void initControllers()
+{
+	PxShape* controllerShape = gPhysics->createShape(PxCapsuleGeometry(0.25f, 1.f), *gMaterial);  // TODO: replace with actual controller shape
+	for (int i = 0; i < 2; ++i)
+	{
+		PxRigidDynamic* body = gPhysics->createRigidDynamic(PxTransform(PxVec3(0.0f, 0.5f, 0.0f)));
+		body->attachShape(*controllerShape);
+		body->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, true);
+		gScene->addActor(*body);
+		gControllerBodies[i] = body;
+	}
+	controllerShape->release();
 }
 
 void initPhysxScene()
@@ -556,9 +565,7 @@ void initPhysxScene()
 	initInflatable(vertices, indices, particleSpacing, totalInflatableMass);
 
 	initObstacles();
-
-	gScene->addActor(*PxCreatePlane(*gPhysics, PxPlane(0.f, 1.f, 0.f, 0.0f), *gMaterial));
-
+	initControllers();
 
 	// Setup rigid bodies
 	const PxReal boxSize = 0.75f;
@@ -634,6 +641,57 @@ void onBeforeRenderParticles()
 	}
 }
 
+void updateActor(PxRigidDynamic* actor, PxTransform targetPose)
+{
+	actor->setKinematicTarget(targetPose);
+}
+
+void animateActorToTarget(PxRigidDynamic* actor, const PxVec3& targetPos, const PxReal dt)
+{
+	const PxVec3 actorPos = actor->getGlobalPose().p;
+	const PxVec3 dir = targetPos - actorPos;
+	const PxReal dist = dir.magnitude();
+	const PxReal maxSpeed = 2.0f;
+	const PxReal maxDistDelta = maxSpeed * dt;
+	if (dist > maxDistDelta)
+		updateActor(actor, PxTransform(actorPos + dir * (maxDistDelta / dist)));
+	else
+		updateActor(actor, PxTransform(targetPos));
+}
+
+void handlePhysicsInputs(PxReal dt)
+{
+	float dist = 5.0f;
+	std::vector<PxVec3> targetPositions =
+	{
+			PxVec3(0.0f, 0.5f, 0.0f),
+			PxVec3(-dist, 0.5f, 0.0f),
+			PxVec3(-dist, 0.5f, -dist),
+			PxVec3(0.0f, 0.5f, -dist),
+			PxVec3(0.0f, 0.5f, -dist),
+			PxVec3(dist, 0.5f, -dist)
+	};
+	static uint32_t targetPosId = 0;
+	static PxReal dtAccu = 0;
+
+	dtAccu += dt;
+	if (dtAccu > 3.0f)
+	{
+		dtAccu = 0;
+		targetPosId++;
+	}
+
+	for (int controllerId = 0; controllerId < 2; ++controllerId)
+	{
+		if (gControllerBodies[controllerId])
+		{	
+			// TODO: use actual controller position
+			uint32_t targetPosIdController = targetPosId + controllerId % targetPositions.size();
+			animateActorToTarget(gControllerBodies[controllerId], targetPositions[targetPosIdController], dt);
+		}
+	}
+}
+
 void updatePhysx(shared_ptr<GLRenderer> renderer) 
 {
 	onBeforeRenderParticles();
@@ -645,6 +703,7 @@ void updatePhysx(shared_ptr<GLRenderer> renderer)
 	accumulatedTime += renderer->timeSinceLastFrame;
 
 	while (accumulatedTime > updateEvery) {
+		handlePhysicsInputs(updateEvery);
 
 		// do update for <updateEvery> seconds
 		gScene->simulate(dt);
