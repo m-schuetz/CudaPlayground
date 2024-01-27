@@ -31,7 +31,6 @@
 #include "cudamanager/PxCudaContextManager.h"
 #include "extensions/PxRemeshingExt.h"
 #include "extensions/PxParticleExt.h"
-#include "extensions/PxParticleClothCooker.h"
 
 using namespace std;
 
@@ -78,9 +77,8 @@ static PxDefaultCpuDispatcher*	gDispatcher = NULL;
 static PxScene*					gScene		= NULL;
 static PxMaterial*				gMaterial	= NULL;
 static PxPBDParticleSystem*		gParticleSystem = NULL;
-static PxParticleAndDiffuseBuffer*	gParticleBuffer = NULL;
-static PxRigidDynamic* gControllerBodies[2] = { NULL, NULL };
-static int	gMaxDiffuseParticles = 0;
+static PxParticleBuffer*		gParticleBuffer = NULL;
+static PxRigidDynamic*			gControllerBodies[2] = { NULL, NULL };
 
 struct{
 	bool measureLaunchDurations = false;
@@ -323,8 +321,6 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 	cuGraphicsUnregisterResource(cugl_main);
 	cuGraphicsUnregisterResource(cugl_vr_left);
 	cuGraphicsUnregisterResource(cugl_vr_right);
-
-
 }
 
 void initCudaProgram(
@@ -374,32 +370,59 @@ PxVec3 cubeVertices[] = { PxVec3(0.5f, -0.5f, -0.5f), PxVec3(0.5f, -0.5f, 0.5f),
 
 PxU32 cubeIndices[] = { 1, 2, 3,  7, 6, 5,  4, 5, 1,  5, 6, 2,  2, 6, 7,  0, 3, 7,  0, 1, 3,  4, 7, 5,  0, 4, 1,  1, 5, 2,  3, 2, 7,  4, 0, 7 };
 
-static void initParticles(const PxU32 numX, const PxU32 numY, const PxU32 numZ, const PxVec3& position = PxVec3(0, 0, 0), const PxReal particleSpacing = 0.2f, const PxReal fluidDensity = 1000.f, const PxU32 maxDiffuseParticles = 100000)
+static void initParticles()
 {
 	PxCudaContextManager* cudaContextManager = gScene->getCudaContextManager();
 	if (cudaContextManager == NULL)
 		return;
 
+	const PxU32 numX = 50;
+	//const PxU32 numY = 120;  // for fluid
+	const PxU32 numY = 200;  // for granular
+	const PxU32 numZ = 30;
+	const PxVec3 position(0.0f, 0.0f, 0.0f);
+	// const PxReal particleSpacing = 0.1f;  // for fluid
+	const PxReal particleSpacing = 0.03f;  // for granular
+	//const PxReal density = 1000.0f;  // for fluid
+	const PxReal density = 10'000.0f;  // for granular
 	const PxU32 maxParticles = numX * numY * numZ;
 
-	const PxReal restOffset = 0.5f * particleSpacing / 0.6f;
-
 	// Material setup
-	PxPBDMaterial* defaultMat = gPhysics->createPBDMaterial(0.05f, 0.05f, 0.f, 0.001f, 0.5f, 0.005f, 0.01f, 0.f, 0.f);
+	// PxReal fluidFriction = 0.05f;
+	// PxReal fluidDamping = 0.05f;
+	// PxReal fluidAdhesion = 0.0f;
+	// PxReal fluidViscosity = 0.001f;
+	// PxReal fluidVorticityConfinement = 10.0f;
+	// PxReal fluidSurfaceTension = 0.00704f;
+	// PxReal fluidCohesion = 0.0704f;
+	// PxReal fluidLift = 0.0f;
+	// PxReal fluidDrag = 0.0f;
+	// PxPBDMaterial* fluidMat = gPhysics->createPBDMaterial(
+	// 	fluidFriction, fluidDamping, fluidAdhesion, fluidViscosity, fluidVorticityConfinement,
+	// 	fluidSurfaceTension, fluidCohesion, fluidLift, fluidDrag);
 
-	defaultMat->setViscosity(0.001f);
-	defaultMat->setSurfaceTension(0.00704f);
-	defaultMat->setCohesion(0.0704f);
-	defaultMat->setVorticityConfinement(10.f);
+	PxReal granularFriction = 1500000.0f;
+	PxReal granularDamping = 0.25f;
+	PxReal granularAdhesion = 10.1f;
+	PxReal granularViscosity = 1000.0f;
+	PxReal granularVorticityConfinement = 0.0f;
+	PxReal granularSurfaceTension = 0.0f;
+	PxReal granularCohesion = 10000.0f;
+	PxReal granularLift = 0.0f;
+	PxReal granularDrag = 0.0f;
+	PxPBDMaterial* fluidMat = gPhysics->createPBDMaterial(
+		granularFriction, granularDamping, granularAdhesion, granularViscosity, granularVorticityConfinement,
+		granularSurfaceTension, granularCohesion, granularLift, granularDrag);
+
 
 	PxPBDParticleSystem* particleSystem = gPhysics->createPBDParticleSystem(*cudaContextManager, 96);
 	gParticleSystem = particleSystem;
 
 	// General particle system setting
-
+	const PxReal restOffset = 0.5f * particleSpacing / 0.6f;
 	const PxReal solidRestOffset = restOffset;
 	const PxReal fluidRestOffset = restOffset * 0.6f;
-	const PxReal particleMass = fluidDensity * 1.333f * 3.14159f * particleSpacing * particleSpacing * particleSpacing;
+	const PxReal particleMass = density * 1.333f * 3.14159f * particleSpacing * particleSpacing * particleSpacing;
 	particleSystem->setRestOffset(restOffset);
 	particleSystem->setContactOffset(restOffset + 0.01f);
 	particleSystem->setParticleContactOffset(fluidRestOffset / 0.6f);
@@ -410,22 +433,13 @@ static void initParticles(const PxU32 numX, const PxU32 numY, const PxU32 numZ, 
 
 	gScene->addActor(*particleSystem);
 
-	// Diffuse particles setting
-	PxDiffuseParticleParams dpParams;
-	dpParams.threshold = 300.0f;
-	dpParams.bubbleDrag = 0.9f;
-	dpParams.buoyancy = 0.9f;
-	dpParams.airDrag = 0.0f;
-	dpParams.kineticEnergyWeight = 0.01f;
-	dpParams.pressureWeight = 1.0f;
-	dpParams.divergenceWeight = 10.f;
-	dpParams.lifetime = 1.0f;
-	dpParams.useAccurateVelocity = false;
-
-	gMaxDiffuseParticles = maxDiffuseParticles;
-
 	// Create particles and add them to the particle system
-	const PxU32 particlePhase = particleSystem->createPhase(defaultMat, PxParticlePhaseFlags(PxParticlePhaseFlag::eParticlePhaseFluid | PxParticlePhaseFlag::eParticlePhaseSelfCollide));
+	PxParticlePhaseFlags phaseFlag = PxParticlePhaseFlags(
+		// PxParticlePhaseFlag::eParticlePhaseFluid |  // Enable for fluid particles
+		PxParticlePhaseFlag::eParticlePhaseSelfCollide
+	);
+	const PxU32 particlePhase = particleSystem->createPhase(fluidMat, phaseFlag);
+
 
 	PxU32* phase = cudaContextManager->allocPinnedHostBuffer<PxU32>(maxParticles);
 	PxVec4* positionInvMass = cudaContextManager->allocPinnedHostBuffer<PxVec4>(maxParticles);
@@ -457,19 +471,15 @@ static void initParticles(const PxU32 numX, const PxU32 numY, const PxU32 numZ, 
 		x += particleSpacing;
 	}
 
-
-	ExtGpu::PxParticleAndDiffuseBufferDesc bufferDesc;
+	ExtGpu::PxParticleBufferDesc bufferDesc;
 	bufferDesc.maxParticles = maxParticles;
 	bufferDesc.numActiveParticles = maxParticles;
-	bufferDesc.maxDiffuseParticles = maxDiffuseParticles;
-	bufferDesc.maxActiveDiffuseParticles = maxDiffuseParticles;
-	bufferDesc.diffuseParams = dpParams;
 
 	bufferDesc.positions = positionInvMass;
 	bufferDesc.velocities = velocity;
 	bufferDesc.phases = phase;
 
-	gParticleBuffer = physx::ExtGpu::PxCreateAndPopulateParticleAndDiffuseBuffer(bufferDesc, cudaContextManager);
+	gParticleBuffer = physx::ExtGpu::PxCreateAndPopulateParticleBuffer(bufferDesc, cudaContextManager);
 	gParticleSystem->addParticleBuffer(gParticleBuffer);
 
 	cudaContextManager->freePinnedHostBuffer(positionInvMass);
@@ -490,7 +500,8 @@ static void initObstacles()
 
 static void initControllers()
 {
-	PxShape* controllerShape = gPhysics->createShape(PxCapsuleGeometry(0.25f, 1.f), *gMaterial);  // TODO: replace with actual controller shape
+	PxShape* controllerShape = gPhysics->createShape(PxSphereGeometry(0.1f), *gMaterial);
+
 	for (int i = 0; i < 2; ++i)
 	{
 		PxRigidDynamic* body = gPhysics->createRigidDynamic(PxTransform(PxVec3(0.0f, 0.5f, 0.0f)));
@@ -506,29 +517,9 @@ void initPhysxScene()
 {
 	gMaterial = gPhysics->createMaterial(0.5f, 0.5f, 0.6f);
 
-	// Setup Cloth
-	const PxReal totalInflatableMass = 100.0f;
-
-	PxReal particleSpacing = 0.05f;
-
-	PxArray<PxVec3> vertices;
-	PxArray<PxU32> indices;
-	//float radius = 2;
-	//createSphere(vertices, indices, PxVec3(0, 10, 0), radius, 0.25f);
-	//initInflatable(vertices, indices, particleSpacing, totalInflatableMass);
-
 	initObstacles();
 	initControllers();
-
-	// PBF
-	bool useLargeFluid = false;
-	const PxReal fluidDensity = 1000.0f;
-	const PxU32 maxDiffuseParticles = useLargeFluid ? 2'000'000 : 100'000;
-	initParticles(
-		50 / 2, 
-		120 * (useLargeFluid ? 5 : 1) / 2, 
-		30 / 2, 
-		PxVec3(-2.5f, 3.f, 0.5f), 0.1f, fluidDensity, maxDiffuseParticles);
+	initParticles();
 
 	// Setup rigid bodies
 	// const PxReal boxSize = 0.75f;
@@ -656,7 +647,7 @@ void animateActorToTarget(PxRigidDynamic* actor, const PxVec3& targetPos, const 
 
 void handlePhysicsInputs(PxReal dt)
 {
-	float dist = 5.0f;
+	float dist = 4.0f;
 	std::vector<PxVec3> targetPositions =
 	{
 			PxVec3(0.0f, 0.5f, 0.0f),
@@ -685,6 +676,21 @@ void handlePhysicsInputs(PxReal dt)
 			animateActorToTarget(gControllerBodies[controllerId], targetPositions[targetPosIdController], dt);
 		}
 	}
+
+	// doesn't work like this. raises error, probably because the buffer is read-only
+	// printf("before\n");
+	// PxVec4* positionsInvMasses = gParticleBuffer->getPositionInvMasses();
+	// uint32_t numParticlesToMove = gParticleBuffer->getNbActiveParticles() / 10;
+	// for (PxU32 i = 0; i < numParticlesToMove; ++i)
+	// {
+	// 	auto moveParticleId = std::rand() % gParticleBuffer->getNbActiveParticles();
+	// 	PxTransform targetPose = gControllerBodies[0]->getGlobalPose();
+	// 	printf("try to set particle\n");
+	// 	positionsInvMasses[moveParticleId].x = targetPose.p.x;
+	// 	positionsInvMasses[moveParticleId].y = targetPose.p.y;
+	// 	positionsInvMasses[moveParticleId].z = targetPose.p.z;
+	// }
+	// printf("after\n");
 }
 
 void updatePhysx(shared_ptr<GLRenderer> renderer) 
