@@ -15,3 +15,4 @@ build/Release/laszip.lib
 build/Debug/*
 build/laszip.dir
 libs/physx/libs
+.vs/
