@@ -76,7 +76,6 @@ static PxPhysics*				gPhysics	= NULL;
 static PxDefaultCpuDispatcher*	gDispatcher = NULL;
 static PxScene*					gScene		= NULL;
 static PxMaterial*				gMaterial	= NULL;
-static PxPvd*					gPvd        = NULL;
 static PxPBDParticleSystem*		gParticleSystem = NULL;
 static PxParticleClothBuffer*	gUserClothBuffer = NULL;
 
@@ -578,11 +577,7 @@ void initPhysxScene()
 void initPhysx(){
 	gFoundation = PxCreateFoundation(PX_PHYSICS_VERSION, gAllocator, gErrorCallback);
 
-	gPvd = PxCreatePvd(*gFoundation);
-	PxPvdTransport* transport = PxDefaultPvdSocketTransportCreate("127.0.0.1", 5425, 10);
-	gPvd->connect(*transport, PxPvdInstrumentationFlag::eALL);
-
-	gPhysics = PxCreatePhysics(PX_PHYSICS_VERSION, *gFoundation, PxTolerancesScale(), true, gPvd);
+	gPhysics = PxCreatePhysics(PX_PHYSICS_VERSION, *gFoundation, PxTolerancesScale(), true);
 	
 	PxCudaContextManager* cudaContextManager = NULL;
 	if (PxGetSuggestedCudaDeviceOrdinal(gFoundation->getErrorCallback()) >= 0)
@@ -613,14 +608,6 @@ void initPhysx(){
 	sceneDesc.broadPhaseType = PxBroadPhaseType::eGPU;
 	sceneDesc.solverType = PxSolverType::eTGS;
 	gScene = gPhysics->createScene(sceneDesc);
-
-	PxPvdSceneClient* pvdClient = gScene->getScenePvdClient();
-	if (pvdClient)
-	{
-		pvdClient->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_CONSTRAINTS, true);
-		pvdClient->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_CONTACTS, true);
-		pvdClient->setScenePvdFlag(PxPvdSceneFlag::eTRANSMIT_SCENEQUERIES, true);
-	}
 
 	initPhysxScene();
 }
@@ -708,12 +695,6 @@ void cleanupPhysics(bool /*interactive*/)
 	PX_RELEASE(gScene);
 	PX_RELEASE(gDispatcher);
 	PX_RELEASE(gPhysics);
-	if (gPvd)
-	{
-		PxPvdTransport* transport = gPvd->getTransport();
-		gPvd->release();	gPvd = NULL;
-		PX_RELEASE(transport);
-	}
 	PX_RELEASE(gFoundation);
 }
 // PHYSX ===============================================
