@@ -94,11 +94,11 @@ void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, Rasterizati
 	float3 lightPos = {-10.0f, 10.0f, 10.0f};
 	// float3 L = {10.0f, 10.0f, 10.0f};
 
-	if(uniforms.vrEnabled){
-		float4 leftPos = uniforms.vr_left_view_inv * float4{0.0, 0.0f, 0.0f, 1.0f};
+	// if(uniforms.vrEnabled){
+	// 	float4 leftPos = uniforms.vr_left_view_inv * float4{0.0, 0.0f, 0.0f, 1.0f};
 
-		lightPos = {leftPos.x, leftPos.y, leftPos.z};
-	}
+	// 	lightPos = {leftPos.x, leftPos.y, leftPos.z};
+	// }
 
 	auto toScreenCoord = [&](float3 p){
 		float4 pos = transform * float4{p.x, p.y, p.z, 1.0f};
@@ -294,7 +294,7 @@ void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, Rasterizati
 				// rgb[2] = 255.0f *  N.z;
 
 				float3 diffuse = {0.8f, 0.8f, 0.8f};
-				float3 ambient = {0.3f, 0.3f, 0.3f};
+				float3 ambient = {0.5f, 0.5f, 0.5f};
 				rgb[0] = clamp(rgb[0] * (lambertian * diffuse.x + ambient.x), 0.0f, 255.0f);
 				rgb[1] = clamp(rgb[1] * (lambertian * diffuse.y + ambient.y), 0.0f, 255.0f);
 				rgb[2] = clamp(rgb[2] * (lambertian * diffuse.z + ambient.z), 0.0f, 255.0f);
@@ -546,7 +546,7 @@ Triangles* createGroundPlane(int cells){
 		rgb[2] = 0;
 
 		float s = 10.0f;
-		float height = -0.5f;
+		float height = 0.0f;
 		
 		triangles->positions[offset + 0] = {s * u0 - s * 0.5f, s * v0 - s * 0.5f, height};
 		triangles->positions[offset + 1] = {s * u1 - s * 0.5f, s * v0 - s * 0.5f, height};

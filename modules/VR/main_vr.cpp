@@ -518,7 +518,7 @@ static void initParticles(ParticleTypes particleType)
 static void initObstacles()
 {
 	const float playgroundSize = 5.0f;
-	gScene->addActor(*PxCreatePlane(*gPhysics, PxPlane(0.f, 1.f, 0.f, 0.5f), *gMaterial));  // ground plane
+	gScene->addActor(*PxCreatePlane(*gPhysics, PxPlane(0.f, 1.f, 0.f, 0.0f), *gMaterial));  // ground plane
 	gScene->addActor(*PxCreatePlane(*gPhysics, PxPlane(0.f, -1.f, 0.f, 100.0f), *gMaterial));  // sky plane
 	gScene->addActor(*PxCreatePlane(*gPhysics, PxPlane(1.f, 0.f, 0.f, playgroundSize), *gMaterial));  // x plane
 	gScene->addActor(*PxCreatePlane(*gPhysics, PxPlane(-1.f, 0.f, 0.f, playgroundSize), *gMaterial));  // -x plane
@@ -528,7 +528,7 @@ static void initObstacles()
 
 static void initControllers()
 {
-	PxShape* controllerShape = gPhysics->createShape(PxSphereGeometry(0.1f), *gMaterial);
+	PxShape* controllerShape = gPhysics->createShape(PxSphereGeometry(0.5f), *gMaterial);
 
 	for (int i = 0; i < 2; ++i)
 	{
@@ -696,14 +696,62 @@ void handlePhysicsInputs(PxReal dt)
 		targetPosId++;
 	}
 
-	for (int controllerId = 0; controllerId < 2; ++controllerId)
-	{
-		if (gControllerBodies[controllerId])
-		{	
-			uint32_t targetPosIdController = targetPosId + controllerId % targetPositions.size();
-			animateActorToTarget(gControllerBodies[controllerId], targetPositions[targetPosIdController], dt);
+	// for (int controllerId = 0; controllerId < 2; ++controllerId)
+	// {
+	// 	if (gControllerBodies[controllerId])
+	// 	{	
+	// 		uint32_t targetPosIdController = targetPosId + controllerId % targetPositions.size();
+	// 		animateActorToTarget(gControllerBodies[controllerId], targetPositions[targetPosIdController], dt);
+	// 	}
+	// }
+
+	if (ovr && ovr->isActive()) {
+
+		if(ovr->getLeftControllerPose().valid){
+			Pose pose = ovr->getLeftControllerPose();
+
+			glm::mat4 transform = pose.transform;
+
+			glm::vec3 scale;
+			glm::quat rotation;
+			glm::vec3 translation;
+			glm::vec3 skew;
+			glm::vec4 perspective;
+			glm::decompose(transform, scale, rotation, translation, skew, perspective);
+
+			auto physx_world = PxVec3(translation.x, translation.y, translation.z);
+			auto physx_rot   = PxQuat(rotation.x, rotation.y, rotation.z, rotation.w);
+			
+			PxTransform phsyxPose(physx_world, physx_rot);
+
+			auto actor = gControllerBodies[0];
+			actor->setKinematicTarget(phsyxPose);
 		}
+
+		if(ovr->getLeftControllerPose().valid){
+			Pose pose = ovr->getRightControllerPose();
+
+			glm::mat4 transform = pose.transform;
+			glm::vec3 scale;
+			glm::quat rotation;
+			glm::vec3 translation;
+			glm::vec3 skew;
+			glm::vec4 perspective;
+			glm::decompose(transform, scale, rotation, translation, skew, perspective);
+
+
+			auto physx_world = PxVec3(translation.x, translation.y, translation.z);
+			auto physx_rot   = PxQuat(rotation.x, rotation.y, rotation.z, rotation.w);
+			
+			PxTransform phsyxPose(physx_world, physx_rot);
+
+			auto actor = gControllerBodies[1];
+			actor->setKinematicTarget(phsyxPose);
+		}
+
 	}
+
+
 
 	/*
 	PxCudaContextManager* cudaContextManager = gScene->getCudaContextManager();
@@ -914,10 +962,10 @@ int main(){
 
 		{ // INFO WINDOW
 
-			if(ImGuiCond_FirstUseEver){
-				ImGui::SetNextWindowPos(ImVec2(10, 280));
-				ImGui::SetNextWindowSize(ImVec2(490, 180));
-			}
+			// if(ImGuiCond_FirstUseEver){
+			// 	ImGui::SetNextWindowPos(ImVec2(10, 280));
+			// 	ImGui::SetNextWindowSize(ImVec2(490, 180));
+			// }
 
 			ImGui::Begin("Infos");
 			
@@ -931,10 +979,10 @@ int main(){
 
 		{ // SETTINGS WINDOW
 
-			if(ImGuiCond_FirstUseEver){
-				ImGui::SetNextWindowPos(ImVec2(10, 280 + 180 + 10));
-				ImGui::SetNextWindowSize(ImVec2(490, 230));
-			}
+			// if(ImGuiCond_FirstUseEver){
+			// 	ImGui::SetNextWindowPos(ImVec2(10, 280 + 180 + 10));
+			// 	ImGui::SetNextWindowSize(ImVec2(490, 230));
+			// }
 
 			ImGui::Begin("Settings");
 

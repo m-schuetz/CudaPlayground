@@ -117,7 +117,7 @@ void GLRenderer::init(){
 		const GLFWvidmode * modeLeft = glfwGetVideoMode(monitors[0]);
 		const GLFWvidmode * modeRight = glfwGetVideoMode(monitors[1]);
 
-		window = glfwCreateWindow(modeRight->width, modeRight->height - 300, "Simple example", nullptr, nullptr);
+		window = glfwCreateWindow(1920, 1080, "Simple example", nullptr, nullptr);
 
 		if (!window) {
 			glfwTerminate();

@@ -19,7 +19,7 @@ namespace cg = cooperative_groups;
 constexpr bool PARTICLES_ENABLED = false;
 
 
-constexpr bool EDL_ENABLED = false;
+constexpr bool EDL_ENABLED = true;
 constexpr uint32_t gridSize = 128;
 constexpr float fGridSize = gridSize;
 constexpr uint32_t numCells = gridSize * gridSize * gridSize;
@@ -276,7 +276,9 @@ void kernel_resolve_pointsToSpheres(
 				float3 L = normalize(lightPos - I);
 				float lambertian = max(dot(N, L), 0.0);
 				float ambient = 0.5f;
+				ambient = sphere.position.z * 0.6f;
 				float diffuse = 0.5 * lambertian + ambient;
+				diffuse = clamp(diffuse, 0.0f, 1.0f);
 
 				float4 viewPos = uniforms.view * make_float4(I, 1.0f);
 				float depth = -viewPos.z;
@@ -713,7 +715,7 @@ void kernel(
 			mat4 wiggle_yaw = mat4::rotate(cos(5.0f * uniforms.time) * 0.1f, {0.0f, 0.0f, 1.0f}).transpose();
 			
 			if(uniforms.vrEnabled){
-				float sController = 0.05f;
+				float sController = 0.5f;
 
 				rs_left.world = rot * uniforms.vr_left_controller_pose.transpose() 
 					* mat4::scale(sController, sController, sController);
@@ -1169,15 +1171,66 @@ void kernel_toOpenGL(
 		});
 
 	}else{
-		// blit custom cuda framebuffer to opengl texture
-		processRange(0, uniforms.width * uniforms.height, [&](int pixelIndex){
+		// // blit custom cuda framebuffer to opengl texture
+		// processRange(0, uniforms.width * uniforms.height, [&](int pixelIndex){
 
+		// 	int x = pixelIndex % int(uniforms.width);
+		// 	int y = pixelIndex / int(uniforms.width);
+
+		// 	uint64_t encoded = framebuffer[pixelIndex];
+		// 	uint32_t color = encoded & 0xffffffffull;
+
+		// 	surf2Dwrite(color, gl_colorbuffer_main, x * 4, y);
+		// });
+
+		// left
+		processRange(0, uniforms.width * uniforms.height, [&](int pixelIndex){
 			int x = pixelIndex % int(uniforms.width);
 			int y = pixelIndex / int(uniforms.width);
 
 			uint64_t encoded = framebuffer[pixelIndex];
 			uint32_t color = encoded & 0xffffffffull;
+			uint8_t* rgba = (uint8_t*)&color;
+			uint32_t idepth = (encoded >> 32);
+			float depth = *((float*)&idepth);
 
+			if(EDL_ENABLED)
+			{
+				float edlRadius = 1.0f;
+				float edlStrength = 0.014f;
+				float2 edlSamples[4] = {
+					{-1.0f,  0.0f},
+					{ 1.0f,  0.0f},
+					{ 0.0f,  1.0f},
+					{ 0.0f, -1.0f}
+				};
+
+				float sum = 0.0f;
+				for(int i = 0; i < 4; i++){
+					float2 samplePos = {
+						x + edlRadius * edlSamples[i].x,
+						y + edlRadius * edlSamples[i].y
+					};
+
+					int sx = clamp(samplePos.x, 0.0f, uniforms.width - 1.0f);
+					int sy = clamp(samplePos.y, 0.0f, uniforms.width - 1.0f);
+					int samplePixelIndex = sx + sy * uniforms.width;
+
+					uint64_t sampleEncoded = framebuffer[samplePixelIndex];
+					uint32_t iSampledepth = (sampleEncoded >> 32);
+					float sampleDepth = *((float*)&iSampledepth);
+
+					sum += max(0.0, depth - sampleDepth);
+				}
+
+				float shade = exp(-sum * 300.0 * edlStrength);
+
+				rgba[0] = float(rgba[0]) * shade;
+				rgba[1] = float(rgba[1]) * shade;
+				rgba[2] = float(rgba[2]) * shade;
+			}
+
+			// uint32_t color = 0x000000ff;
 			surf2Dwrite(color, gl_colorbuffer_main, x * 4, y);
 		});
 	}
