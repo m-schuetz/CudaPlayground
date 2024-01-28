@@ -388,49 +388,63 @@ PxVec3 cubeVertices[] = { PxVec3(0.5f, -0.5f, -0.5f), PxVec3(0.5f, -0.5f, 0.5f),
 
 PxU32 cubeIndices[] = { 1, 2, 3,  7, 6, 5,  4, 5, 1,  5, 6, 2,  2, 6, 7,  0, 3, 7,  0, 1, 3,  4, 7, 5,  0, 4, 1,  1, 5, 2,  3, 2, 7,  4, 0, 7 };
 
-static void initParticles()
+enum ParticleTypes
+{
+	eWater = 0,
+	eSand = 1,
+};
+
+static void initParticles(ParticleTypes particleType)
 {
 	PxCudaContextManager* cudaContextManager = gScene->getCudaContextManager();
 	if (cudaContextManager == NULL)
 		return;
 
-	const PxU32 numX = 50;
-	//const PxU32 numY = 120;  // for fluid
-	const PxU32 numY = 200;  // for granular
-	const PxU32 numZ = 30;
 	const PxVec3 position(0.0f, 0.0f, 0.0f);
-	// const PxReal particleSpacing = 0.1f;  // for fluid
-	const PxReal particleSpacing = 0.03f;  // for granular
-	//const PxReal density = 1000.0f;  // for fluid
-	const PxReal density = 10'000.0f;  // for granular
-	const PxU32 maxParticles = numX * numY * numZ;
+
+	// fluid as default
+	const PxU32 numX = 50;
+	PxU32 numY = 120;  
+	const PxU32 numZ = 30;
+	PxReal particleSpacing = 0.1f;
+	PxReal density = 1000.0f;
 
 	// Material setup
-	// PxReal fluidFriction = 0.05f;
-	// PxReal fluidDamping = 0.05f;
-	// PxReal fluidAdhesion = 0.0f;
-	// PxReal fluidViscosity = 0.001f;
-	// PxReal fluidVorticityConfinement = 10.0f;
-	// PxReal fluidSurfaceTension = 0.00704f;
-	// PxReal fluidCohesion = 0.0704f;
-	// PxReal fluidLift = 0.0f;
-	// PxReal fluidDrag = 0.0f;
-	// PxPBDMaterial* fluidMat = gPhysics->createPBDMaterial(
-	// 	fluidFriction, fluidDamping, fluidAdhesion, fluidViscosity, fluidVorticityConfinement,
-	// 	fluidSurfaceTension, fluidCohesion, fluidLift, fluidDrag);
+	PxReal friction = 0.05f;
+	PxReal damping = 0.05f;
+	PxReal adhesion = 0.0f;
+	PxReal viscosity = 0.001f;
+	PxReal vorticityConfinement = 10.0f;
+	PxReal surfaceTension = 0.00704f;
+	PxReal cohesion = 0.0704f;
+	PxReal lift = 0.0f;
+	PxReal drag = 0.0f;
 
-	PxReal granularFriction = 1500000.0f;
-	PxReal granularDamping = 0.25f;
-	PxReal granularAdhesion = 10.1f;
-	PxReal granularViscosity = 1000.0f;
-	PxReal granularVorticityConfinement = 0.0f;
-	PxReal granularSurfaceTension = 0.0f;
-	PxReal granularCohesion = 10000.0f;
-	PxReal granularLift = 0.0f;
-	PxReal granularDrag = 0.0f;
+	PxParticlePhaseFlags phaseFlag = PxParticlePhaseFlags(
+		PxParticlePhaseFlag::eParticlePhaseFluid | 
+		PxParticlePhaseFlag::eParticlePhaseSelfCollide
+	);
+
+	if (particleType == ParticleTypes::eSand)
+	{
+		numY = 200;
+		particleSpacing = 0.03f;
+		density = 10'000.0f;
+		friction = 1500000.0f;
+		damping = 0.25f;
+		adhesion = 10.1f;
+		viscosity = 1000.0f;
+		vorticityConfinement = 0.0f;
+		surfaceTension = 0.0f;
+		cohesion = 10000.0f;
+		lift = 0.0f;
+		drag = 0.0f;
+		phaseFlag = PxParticlePhaseFlag::eParticlePhaseSelfCollide;  // no Fluid / pressure
+	}
+
 	PxPBDMaterial* fluidMat = gPhysics->createPBDMaterial(
-		granularFriction, granularDamping, granularAdhesion, granularViscosity, granularVorticityConfinement,
-		granularSurfaceTension, granularCohesion, granularLift, granularDrag);
+		friction, damping, adhesion, viscosity, vorticityConfinement,
+		surfaceTension, cohesion, lift, drag);
 
 
 	PxPBDParticleSystem* particleSystem = gPhysics->createPBDParticleSystem(*cudaContextManager, 96);
@@ -452,13 +466,9 @@ static void initParticles()
 	gScene->addActor(*particleSystem);
 
 	// Create particles and add them to the particle system
-	PxParticlePhaseFlags phaseFlag = PxParticlePhaseFlags(
-		// PxParticlePhaseFlag::eParticlePhaseFluid |  // Enable for fluid particles
-		PxParticlePhaseFlag::eParticlePhaseSelfCollide
-	);
 	const PxU32 particlePhase = particleSystem->createPhase(fluidMat, phaseFlag);
 
-
+	const PxU32 maxParticles = numX * numY * numZ;
 	PxU32* phase = cudaContextManager->allocPinnedHostBuffer<PxU32>(maxParticles);
 	PxVec4* positionInvMass = cudaContextManager->allocPinnedHostBuffer<PxVec4>(maxParticles);
 	PxVec4* velocity = cudaContextManager->allocPinnedHostBuffer<PxVec4>(maxParticles);
@@ -537,7 +547,7 @@ void initPhysxScene()
 
 	initObstacles();
 	initControllers();
-	initParticles();
+	initParticles(ParticleTypes::eWater);
 
 	// Setup rigid bodies
 	// const PxReal boxSize = 0.75f;
