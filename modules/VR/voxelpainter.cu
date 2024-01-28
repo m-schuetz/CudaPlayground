@@ -112,6 +112,253 @@ void spawnParticle(
 }
 
 extern "C" __global__
+void kernel_resolve_pointsToSpheres(
+	const Uniforms _uniforms,
+	uint32_t* buffer,
+	uint64_t* fb_points,
+	uint64_t* fb_vr_left_points,
+	uint64_t* fb_vr_right_points,
+	uint64_t* framebuffer,
+	uint64_t* fb_vr_left,
+	uint64_t* fb_vr_right,
+	float4* phsx_positions,
+	const uint32_t physx_numParticles
+){
+	auto grid = cg::this_grid();
+	auto block = cg::this_thread_block();
+
+	// return;
+
+	// prepare some stuff for ray casting
+	auto projToWorld = [&](float4 pos) -> float4{
+		float4 viewspace = uniforms.proj_inv * pos;
+
+		if(!uniforms.vrEnabled){
+			viewspace = viewspace / viewspace.w;
+		}
+
+		return uniforms.view_inv * viewspace;
+	};
+
+	float4 origin_projspace = uniforms.proj * float4{0.0f, 0.0f, 0.0f, 1.0f};
+	float4 dir_00_projspace = float4{-1.0f, -1.0f, 0.0f, 1.0f};
+	float4 dir_01_projspace = float4{-1.0f,  1.0f, 0.0f, 1.0f};
+	float4 dir_10_projspace = float4{ 1.0f, -1.0f, 0.0f, 1.0f};
+	float4 dir_11_projspace = float4{ 1.0f,  1.0f, 0.0f, 1.0f};
+
+	float4 origin_worldspace = projToWorld(origin_projspace);
+	float4 dir_00_worldspace = projToWorld(dir_00_projspace);
+	float4 dir_01_worldspace = projToWorld(dir_01_projspace);
+	float4 dir_10_worldspace = projToWorld(dir_10_projspace);
+	float4 dir_11_worldspace = projToWorld(dir_11_projspace);
+
+	// tile-based resolve of points/sprites
+	int tileSize = 16;
+	int tiles_x = (uniforms.width / tileSize);
+	int tiles_y = (uniforms.height / tileSize) - 1;
+	int numTiles = tiles_x * tiles_y;
+	__shared__ int numSpheresInTile;
+	int numPixels = uniforms.width * uniforms.height;
+	int width = uniforms.width;
+	int height = uniforms.height;
+
+	for_blockwise(numTiles, [&](int tileID){
+
+		struct Particle{
+			float3 position;
+			uint32_t index;
+		};
+
+		constexpr int PARTICLE_LIST_CAPACITY = 10 * 16 * 16;
+		__shared__ int sh_numSpheresInTile;
+		__shared__ Particle sh_spherePositions[PARTICLE_LIST_CAPACITY];
+		__shared__ bool sh_dbg;
+		sh_dbg = false;
+		sh_numSpheresInTile = 0;
+		block.sync();
+
+		int tile_x = tileID % tiles_x;
+		int tile_y = tileID / tiles_x;
+		int base_x = tileSize * tile_x;
+		int base_y = tileSize * tile_y;
+		int ix = block.thread_rank() % tileSize;
+		int iy = block.thread_rank() / tileSize;
+
+		int px = base_x + ix;
+		int py = base_y + iy;
+		int pixelID = px + uniforms.width * py;
+
+		// // check if there is a sphere in that pixel
+		// {
+		// 	uint64_t value = fb_points[pixelID];
+		// 	uint32_t particleIndex = value & 0xffffffff;
+		// 	if(particleIndex > 0 && particleIndex < physx_numParticles){
+		// 		uint32_t localSphereIndex = atomicAdd(&sh_numSpheresInTile, 1);
+		// 		float3 spherePos_tmp = make_float3(phsx_positions[particleIndex]);
+		// 		float3 spherePos = {
+		// 			spherePos_tmp.x,
+		// 			-spherePos_tmp.z,
+		// 			spherePos_tmp.y,
+		// 		};
+
+		// 		sh_spherePositions[localSphereIndex] = {spherePos, particleIndex};
+		// 	}
+		// }
+
+		for(int dx = -tileSize; dx <= tileSize; dx += tileSize)
+		for(int dy = -tileSize; dy <= tileSize; dy += tileSize)
+		{
+			block.sync();
+
+			int _px = px + dx;
+			int _py = py + dy;
+			int _pixelID = _px + uniforms.width * _py;
+
+			bool xOK = _px >= 0 && _px < uniforms.width;
+			bool yOK = _py >= 0 && _py < uniforms.height;
+
+			if(xOK && yOK){
+				uint64_t value = fb_points[_pixelID];
+				uint32_t particleIndex = value & 0xffffffff;
+				if(particleIndex > 0 && particleIndex < physx_numParticles){
+					uint32_t localSphereIndex = atomicAdd(&sh_numSpheresInTile, 1);
+					float3 spherePos_tmp = make_float3(phsx_positions[particleIndex]);
+					float3 spherePos = {
+						spherePos_tmp.x,
+						-spherePos_tmp.z,
+						spherePos_tmp.y,
+					};
+
+					if(localSphereIndex < PARTICLE_LIST_CAPACITY)
+					sh_spherePositions[localSphereIndex] = {spherePos, particleIndex};
+				}
+			}
+
+			block.sync();
+		}
+
+
+		block.sync();
+		sh_numSpheresInTile = atomicMin(&sh_numSpheresInTile, PARTICLE_LIST_CAPACITY);
+
+		block.sync();
+
+		//====== raycast stuff
+		float u = float(px) / uniforms.width;
+		float v = float(py) / uniforms.height;
+
+		float A_00 = (1.0f - u) * (1.0f - v);
+		float A_01 = (1.0f - u) *         v;
+		float A_10 =         u  * (1.0f - v);
+		float A_11 =         u  *         v;
+
+		float3 dir = make_float3(
+			A_00 * dir_00_worldspace + 
+			A_01 * dir_01_worldspace + 
+			A_10 * dir_10_worldspace + 
+			A_11 * dir_11_worldspace - origin_worldspace);
+		dir = normalize(dir);
+		float3 origin = make_float3(origin_worldspace);
+		//====== raycast stuff
+
+		uint64_t closest = uint64_t(Infinity) << 32;
+		float sphereRadius = 0.03f;
+
+		for(int i = 0; i < sh_numSpheresInTile; i++){
+			Particle sphere = sh_spherePositions[i];
+			
+			float t = raySphereIntersection(origin, dir, sphere.position, sphereRadius);
+
+			if(t > 0.0f){
+				float3 I = origin + dir * t;
+				float3 N = normalize(I - sphere.position);
+				float3 lightPos = {10.0f, 10.0f, 10.0f};
+				float3 L = normalize(lightPos - I);
+				float lambertian = max(dot(N, L), 0.0);
+				float ambient = 0.5f;
+				float diffuse = 0.5 * lambertian + ambient;
+
+				float4 viewPos = uniforms.view * make_float4(I, 1.0f);
+				float depth = -viewPos.z;
+				uint64_t udepth = *((uint32_t*)&depth);
+				uint32_t color = SPECTRAL[sphere.index % 11];
+				uint8_t* rgba = (uint8_t*)&color;
+				rgba[0] = diffuse * rgba[0];
+				rgba[1] = diffuse * rgba[1];
+				rgba[2] = diffuse * rgba[2];
+
+				uint64_t pixel = udepth << 32 | color;
+				closest = min(closest, pixel);
+			}
+		}
+		
+		//====== raycast stuff
+		// float3 spherePos = {
+		// 	0.0f, 
+		// 	sin(uniforms.time), 
+		// 	0.0f
+		// };
+
+		// dir.z = -dir.z;
+		// if(false)
+		// for(int particleIndex = 0; particleIndex < 500; particleIndex++){
+		// 	float3 spherePos = {
+		// 		phsx_positions[particleIndex].x,
+		// 		phsx_positions[particleIndex].z,
+		// 		phsx_positions[particleIndex].y,
+		// 	};
+		// 	// float3 spherePos = {
+		// 	// 	phsx_positions[1234 * particleIndex % physx_numParticles].x,
+		// 	// 	phsx_positions[1234 * particleIndex % physx_numParticles].z,
+		// 	// 	phsx_positions[1234 * particleIndex % physx_numParticles].y,
+		// 	// };
+		// 	float t = raySphereIntersection(origin, dir, spherePos, 0.037f);
+
+		// 	if(t > 0.0f){
+		// 		float3 I = origin + dir * t;
+		// 		float3 N = normalize(I - spherePos);
+		// 		float3 lightPos = {10.0f, 10.0f, 10.0f};
+		// 		float3 L = normalize(lightPos - I);
+		// 		float lambertian = max(dot(N, L), 0.0);
+
+		// 		float4 viewPos = uniforms.view * make_float4(I, 1.0f);
+		// 		float depth = -viewPos.z;
+		// 		uint64_t udepth = *((uint32_t*)&depth);
+		// 		uint32_t color = SPECTRAL[particleIndex % 11];
+		// 		uint8_t* rgba = (uint8_t*)&color;
+		// 		rgba[0] = clamp((lambertian + 0.3f), 0.0f, 1.0f) * rgba[0];
+		// 		rgba[1] = clamp((lambertian + 0.3f), 0.0f, 1.0f) * rgba[1];
+		// 		rgba[2] = clamp((lambertian + 0.3f), 0.0f, 1.0f) * rgba[2];
+
+		// 		uint64_t pixel = udepth << 32 | color;
+		// 		closest = min(closest, pixel);
+		// 	}
+		// }
+		//====== raycast stuff
+
+
+		// if(sh_dbg)
+		// {
+		// 	float depth = 1.0f;
+		// 	uint64_t udepth = *((uint32_t*)&depth);
+		// 	uint32_t color = tileID * 123456;
+		// 	uint8_t* rgba = (uint8_t*)&color;
+		// 	float w = clamp(2.0f * float(sh_numSpheresInTile), 0.0f, 255.0f);
+		// 	rgba[0] = w;
+		// 	rgba[1] = w;
+		// 	rgba[2] = w;
+		// 	color = grid.block_rank() * 12345;
+		// 	uint64_t pixel = (udepth << 32) | color;
+		// 	closest = pixel;
+		// }
+		
+		if(pixelID < 0 || pixelID >= uniforms.width * uniforms.height) return;
+		
+		atomicMin(&framebuffer[pixelID], closest);
+	});
+}
+
+extern "C" __global__
 void kernel(
 	const Uniforms _uniforms,
 	uint32_t* buffer,
@@ -121,6 +368,9 @@ void kernel(
 	uint64_t* framebuffer,
 	uint64_t* fb_vr_left,
 	uint64_t* fb_vr_right,
+	uint64_t* fb_points,
+	uint64_t* fb_points_vr_left,
+	uint64_t* fb_points_vr_right,
 	uint32_t numTriangles,
 	float3* positions,
 	float2* uvs,
@@ -153,9 +403,9 @@ void kernel(
 		}
 	}
 
-	uint64_t* fb_points          = allocator->alloc<uint64_t*>(uniforms.width * uniforms.height * sizeof(uint64_t));
-	uint64_t* fb_points_vr_left  = allocator->alloc<uint64_t*>(uniforms.vr_left_width * uniforms.vr_left_height * sizeof(uint64_t));
-	uint64_t* fb_points_vr_right = allocator->alloc<uint64_t*>(uniforms.vr_right_width * uniforms.vr_right_height * sizeof(uint64_t));
+	// uint64_t* fb_points          = allocator->alloc<uint64_t*>(uniforms.width * uniforms.height * sizeof(uint64_t));
+	// uint64_t* fb_points_vr_left  = allocator->alloc<uint64_t*>(uniforms.vr_left_width * uniforms.vr_left_height * sizeof(uint64_t));
+	// uint64_t* fb_points_vr_right = allocator->alloc<uint64_t*>(uniforms.vr_right_width * uniforms.vr_right_height * sizeof(uint64_t));
 	{
 		uint64_t clearValue = (uint64_t(Infinity) << 32ull) | uint64_t(0);
 
@@ -358,72 +608,79 @@ void kernel(
 
 	grid.sync();
 
-	// if(false)
-	// {
-	// 	Triangles* sphere = createSphere(24);
-	// 	for(int i = 0; i <= 10; i++)
-	// 	for(int j = -10; j <= 10; j += 2)
-	// 	// for(int j : {0, 1, 2})
-	// 	// for(int i : {1})
-	// 	// for(int j : {-5})
-	// 	{
-	// 		// uint32_t X = curand(&thread_random_state) >> 16;
-	// 		// uint32_t Y = curand(&thread_random_state) >> 16;
-	// 		// uint32_t Z = curand(&thread_random_state) >> 16;
-	// 		// uint32_t upper = 1 << 16;
+	if(false)
+	{
+		Triangles* sphere = createSphere(6);
+		float radius = 0.03f;
 
-	// 		// float x = float(X) / float(upper) - 0.5f;
-	// 		// float y = float(Y) / float(upper) - 0.5f;
-	// 		// float z = float(Z) / float(upper) - 0.5f;
+		// for(int i = 0; i <= 10; i++)
+		// for(int j = -10; j <= 10; j += 2)
+		// for(int j : {0, 1, 2})
+		// for(int i : {1})
+		// for(int j : {-5})
+		for(int particleIndex = 0; particleIndex < 1000; particleIndex++)
+		{
+			// uint32_t X = curand(&thread_random_state) >> 16;
+			// uint32_t Y = curand(&thread_random_state) >> 16;
+			// uint32_t Z = curand(&thread_random_state) >> 16;
+			// uint32_t upper = 1 << 16;
 
-	// 		float x = i - 5;
+			// float x = float(X) / float(upper) - 0.5f;
+			// float y = float(Y) / float(upper) - 0.5f;
+			// float z = float(Z) / float(upper) - 0.5f;
 
-	// 		rs_main.texture = nullptr;
-	// 		rs_main.colorMode = COLORMODE_UV;
-	// 		rs_main.world = mat4::translate(x, -j - 1.0f, -0.3f) * mat4::scale(0.2f, 0.2f, 0.2f);
+			float4 particle = phsx_positions[particleIndex];
+
+			// float x = i - 5;
+
+			rs_main.texture = nullptr;
+			rs_main.colorMode = COLORMODE_UV;
+			rs_main.world = 
+				mat4::translate(particle.x, -particle.z, particle.y) * 
+				mat4::scale(radius, radius, radius);
 			
 
-	// 		if(uniforms.vrEnabled){
-	// 			RasterizationSettings rs_left;
-	// 			rs_left.texture   = nullptr;
-	// 			rs_left.colorMode = COLORMODE_UV;
-	// 			rs_left.world     = mat4::translate(x, -j - 1.0f, -0.3f) * mat4::scale(0.2f, 0.2f, 0.2f);
-	// 			rs_left.view      = uniforms.vr_left_view;
-	// 			rs_left.proj      = uniforms.vr_left_proj;
-	// 			rs_left.transform = uniforms.vr_left_transform;
-	// 			rs_left.width     = uniforms.vr_left_width;
-	// 			rs_left.height    = uniforms.vr_left_height;
+			if(uniforms.vrEnabled){
+				// RasterizationSettings rs_left;
+				// rs_left.texture   = nullptr;
+				// rs_left.colorMode = COLORMODE_UV;
+				// rs_left.world     = mat4::translate(x, -j - 1.0f, -0.3f) * mat4::scale(0.2f, 0.2f, 0.2f);
+				// rs_left.view      = uniforms.vr_left_view;
+				// rs_left.proj      = uniforms.vr_left_proj;
+				// rs_left.transform = uniforms.vr_left_transform;
+				// rs_left.width     = uniforms.vr_left_width;
+				// rs_left.height    = uniforms.vr_left_height;
 				
-	// 			rasterizeTriangles(sphere, fb_vr_left, rs_left);
-	// 			grid.sync();
+				// rasterizeTriangles(sphere, fb_vr_left, rs_left);
+				// grid.sync();
 
-	// 			RasterizationSettings rs_right;
-	// 			rs_right.texture   = nullptr;
-	// 			rs_right.colorMode = COLORMODE_VERTEXCOLOR;
-	// 			rs_right.world     = mat4::translate(x, -j - 1.0f, -0.3f) * mat4::scale(0.2f, 0.2f, 0.2f);
-	// 			rs_right.view      = uniforms.vr_right_view;
-	// 			rs_right.proj      = uniforms.vr_right_proj;
-	// 			rs_right.transform = uniforms.vr_right_transform;
-	// 			rs_right.width     = uniforms.vr_right_width;
-	// 			rs_right.height    = uniforms.vr_right_height;
-	// 			rasterizeTriangles(sphere, fb_vr_right, rs_right);
+				// RasterizationSettings rs_right;
+				// rs_right.texture   = nullptr;
+				// rs_right.colorMode = COLORMODE_VERTEXCOLOR;
+				// rs_right.world     = mat4::translate(x, -j - 1.0f, -0.3f) * mat4::scale(0.2f, 0.2f, 0.2f);
+				// rs_right.view      = uniforms.vr_right_view;
+				// rs_right.proj      = uniforms.vr_right_proj;
+				// rs_right.transform = uniforms.vr_right_transform;
+				// rs_right.width     = uniforms.vr_right_width;
+				// rs_right.height    = uniforms.vr_right_height;
+				// rasterizeTriangles(sphere, fb_vr_right, rs_right);
 
-	// 			// mat4 transform = uniforms.vr_right_transform;
-	// 			// // mat4 transform = uniforms.vr_right_proj * uniforms.vr_right_view;
-	// 			// float3 position = {x, -0.3f, -j - 1.0f};
-	// 			// rasterizeSprite(fb_vr_right, position, 0x000000ff, 10, transform, uniforms.vr_right_width, uniforms.vr_right_height);
+				// // mat4 transform = uniforms.vr_right_transform;
+				// // // mat4 transform = uniforms.vr_right_proj * uniforms.vr_right_view;
+				// // float3 position = {x, -0.3f, -j - 1.0f};
+				// // rasterizeSprite(fb_vr_right, position, 0x000000ff, 10, transform, uniforms.vr_right_width, uniforms.vr_right_height);
 
-	// 			grid.sync();
-	// 		}else{
-	// 			// rasterizeTriangles(sphere, framebuffer, rs_main);
-	// 			float3 position = {x, -0.3f, -j - 1.0f};
-	// 			if(grid.thread_rank() == 0)
-	// 			rasterizeSprite(framebuffer, position, 0x000000ff, 10, uniforms.transform, uniforms.width, uniforms.height);
-	// 		}
+				// grid.sync();
+			}else{
+				rasterizeTriangles(sphere, framebuffer, rs_main);
+				// float3 position = {x, -0.3f, -j - 1.0f};
+				// if(grid.thread_rank() == 0)
+				// rasterizeSprite(framebuffer, position, 0x000000ff, 10, uniforms.transform, uniforms.width, uniforms.height);
+			}
 
-	// 		grid.sync();
-	// 	}
-	// }
+			grid.sync();
+		}
+	}
 
 	grid.sync();
 
@@ -522,7 +779,6 @@ void kernel(
 
 		float3 position = particles.position[index];
 		uint32_t color = particles.color[index];
-
 		
 
 		if(uniforms.vrEnabled){
@@ -553,334 +809,127 @@ void kernel(
 	});
 
 	// DRAW PHYSX PARTICLES
-	processRange(physx_numParticles, [&](int index){
+	processRange(physx_numParticles, [&](uint32_t index){
 
 		float4 position = phsx_positions[index];
 		float3 pos3 = make_float3(position);
+
+		// phsx_positions[index].y += 10.0f;
 
 		// rasterizeSprite(framebuffer, pos3, 0x0000ffff, 5, uniforms.transform, uniforms.width, uniforms.height);
 
 		rasterizePoint(fb_points, pos3, index, uniforms.transform, uniforms.width, uniforms.height);
 
-		if(uniforms.vrEnabled){
-			rasterizeSprite(
-				fb_vr_left, pos3, 0x0000ffff, 10,
-				uniforms.vr_left_transform, uniforms.vr_left_width, uniforms.vr_left_height
-			);
+		// if(uniforms.vrEnabled){
+		// 	rasterizeSprite(
+		// 		fb_vr_left, pos3, 0x0000ffff, 10,
+		// 		uniforms.vr_left_transform, uniforms.vr_left_width, uniforms.vr_left_height
+		// 	);
 
-			rasterizeSprite(
-				fb_vr_right, pos3, 0x0000ffff, 10,
-				uniforms.vr_right_transform, uniforms.vr_right_width, uniforms.vr_right_height
-			);
-		}
+		// 	rasterizeSprite(
+		// 		fb_vr_right, pos3, 0x0000ffff, 10,
+		// 		uniforms.vr_right_transform, uniforms.vr_right_width, uniforms.vr_right_height
+		// 	);
+		// }
 
 	});
 
 	grid.sync();
 
 
-	// prepare some stuff for ray casting
-	auto projToWorld = [&](float4 pos) -> float4{
-		float4 viewspace = uniforms.proj_inv * pos;
-
-		if(!uniforms.vrEnabled){
-			viewspace = viewspace / viewspace.w;
-		}
-
-		return uniforms.view_inv * viewspace;
-	};
-
-	float4 origin_projspace = uniforms.proj * float4{0.0f, 0.0f, 0.0f, 1.0f};
-	float4 dir_00_projspace = float4{-1.0f, -1.0f, 0.0f, 1.0f};
-	float4 dir_01_projspace = float4{-1.0f,  1.0f, 0.0f, 1.0f};
-	float4 dir_10_projspace = float4{ 1.0f, -1.0f, 0.0f, 1.0f};
-	float4 dir_11_projspace = float4{ 1.0f,  1.0f, 0.0f, 1.0f};
-
-	float4 origin_worldspace = projToWorld(origin_projspace);
-	float4 dir_00_worldspace = projToWorld(dir_00_projspace);
-	float4 dir_01_worldspace = projToWorld(dir_01_projspace);
-	float4 dir_10_worldspace = projToWorld(dir_10_projspace);
-	float4 dir_11_worldspace = projToWorld(dir_11_projspace);
 	
 
 
-
-	// tile-based resolve of points/sprites
-	int tileSize = 16;
-	int tiles_x = (uniforms.width / tileSize);
-	int tiles_y = (uniforms.height / tileSize) - 1;
-	int numTiles = tiles_x * tiles_y;
-	for_blockwise(numTiles, [&](int tileID){
-		int tile_x = tileID % tiles_x;
-		int tile_y = tileID / tiles_x;
-
-		int base_x = tileSize * tile_x;
-		int base_y = tileSize * tile_y;
-
-		int ix = block.thread_rank() % tileSize;
-		int iy = block.thread_rank() / tileSize;
-
-		int px = base_x + ix;
-		int py = base_y + iy;
-
-		//====== raycast stuff
-		float u = float(px) / uniforms.width;
-		float v = float(py) / uniforms.height;
-
-		float A_00 = (1.0f - u) * (1.0f - v);
-		float A_01 = (1.0f - u) *         v;
-		float A_10 =         u  * (1.0f - v);
-		float A_11 =         u  *         v;
-
-		float3 dir = make_float3(
-			A_00 * dir_00_worldspace + 
-			A_01 * dir_01_worldspace + 
-			A_10 * dir_10_worldspace + 
-			A_11 * dir_11_worldspace - origin_worldspace);
-		dir = normalize(dir);
-		float3 origin = make_float3(origin_worldspace);
-		//====== raycast stuff
-
-
-		
-
-
-		uint64_t closest = uint64_t(Infinity) << 32;
-
-		float radius = 10.0f;
-		if(false)
-		for(float dx = -radius; dx <= radius; dx += 1.0f)
-		for(float dy = -radius; dy <= radius; dy += 1.0f)
-		{
-
-			float d = sqrt(dx * dx + dy * dy);
-			float dn = d / radius;
-
-			int px = base_x + ix + dx;
-			int py = base_y + iy + dy;
-			int pixelID = px + uniforms.width * py;
-
-			if(px < 0 || px >= uniforms.width) continue;
-			if(py < 0 || py >= uniforms.height) continue;
-
-			uint64_t value = fb_points[pixelID];
-
-			uint32_t particleIndex = value & 0xffffffffllu;
-
-			if(particleIndex == 0 || particleIndex >= physx_numParticles) continue;
-
-			// float3 spherePos = {-0.5f, 0.0f, 0.0f};
-			float3 spherePos = {
-				phsx_positions[particleIndex].x,
-				phsx_positions[particleIndex].z,
-				phsx_positions[particleIndex].y
-			};
-			float u = float(px) / uniforms.width;
-			float v = float(py) / uniforms.height;
-
-			float A_00 = (1.0f - u) * (1.0f - v);
-			float A_01 = (1.0f - u) *         v;
-			float A_10 =         u  * (1.0f - v);
-			float A_11 =         u  *         v;
-
-			float3 dir = make_float3(
-				A_00 * dir_00_worldspace + 
-				A_01 * dir_01_worldspace + 
-				A_10 * dir_10_worldspace + 
-				A_11 * dir_11_worldspace - origin_worldspace);
-			dir = normalize(dir);
-			float t = raySphereIntersection(origin, dir, spherePos, 0.05f);
-
-			if(t < 0.0f){
-				// float3 I = origin + dir * t;
-				// float3 N = normalize(I - spherePos);
-				// float3 lightPos = {10.0f, 10.0f, 10.0f};
-				// float3 L = normalize(lightPos - I);
-				// float lambertian = max(dot(N, L), 0.0);
-
-				// float4 viewPos = uniforms.view * make_float4(I, 1.0f);
-				// float depth = -viewPos.z;
-				// uint64_t udepth = *((uint32_t*)&depth);
-				// uint32_t color = t;
-				// uint8_t* rgba = (uint8_t*)&color;
-				// rgba[0] = lambertian * 255.0;
-				// rgba[1] = lambertian * 255.0;
-				// rgba[2] = lambertian * 255.0;
-
-				// uint64_t pixel = udepth << 32 | color;
-
-				// closest = min(closest, pixel);
-				
-				float abc = 1.0f;
-				uint64_t uabc = *((uint32_t*)&abc);
-				closest = uabc << 32 | 0x000000ff;
-
-			}
-
-			// uint32_t color = 0;
-			// uint8_t* rgba = (uint8_t*)&color;
-
-			// uint64_t clearValue = (uint64_t(Infinity) << 32ull) | uint64_t(0);
-
-			// uint32_t baseColor = SPECTRAL[particleIndex % 11];
-			// color = baseColor;
-
-			// if(value < clearValue){
-			// 	// color = 0x000000ff;
-			// 	rgba[0] = rgba[0] * (0.3f * (1.0f - dn) + 0.7f);
-			// 	rgba[1] = rgba[1] * (0.3f * (1.0f - dn) + 0.7f);
-			// 	rgba[2] = rgba[2] * (0.3f * (1.0f - dn) + 0.7f);
-			// }
-			// // color = 0xffffff;
-			// uint64_t mask = 0xffffffff'00000000llu;
-			// value = value & mask;
-			// value = value | color;
-			
-			// if(dn <= 1.0f)
-			// closest = min(closest, value);
-		}
-		
-		//====== raycast stuff
-		// float3 spherePos = {
-		// 	0.0f, 
-		// 	sin(uniforms.time), 
-		// 	0.0f
-		// };
-
-		// dir.z = -dir.z;
-		for(int particleIndex = 0; particleIndex < 500; particleIndex++){
-			float3 spherePos = {
-				phsx_positions[1234 * particleIndex % physx_numParticles].x,
-				phsx_positions[1234 * particleIndex % physx_numParticles].z,
-				phsx_positions[1234 * particleIndex % physx_numParticles].y,
-			};
-			float t = raySphereIntersection(origin, dir, spherePos, 0.037f);
-
-			if(t > 0.0f){
-				float3 I = origin + dir * t;
-				float3 N = normalize(I - spherePos);
-				float3 lightPos = {10.0f, 10.0f, 10.0f};
-				float3 L = normalize(lightPos - I);
-				float lambertian = max(dot(N, L), 0.0);
-
-				float4 viewPos = uniforms.view * make_float4(I, 1.0f);
-				float depth = -viewPos.z;
-				uint64_t udepth = *((uint32_t*)&depth);
-				uint32_t color = SPECTRAL[particleIndex % 11];
-				uint8_t* rgba = (uint8_t*)&color;
-				rgba[0] = clamp((lambertian + 0.3f), 0.0f, 1.0f) * rgba[0];
-				rgba[1] = clamp((lambertian + 0.3f), 0.0f, 1.0f) * rgba[1];
-				rgba[2] = clamp((lambertian + 0.3f), 0.0f, 1.0f) * rgba[2];
-
-				uint64_t pixel = udepth << 32 | color;
-				closest = min(closest, pixel);
-			}
-		}
-		//====== raycast stuff
-
-
-		int pixelID = px + uniforms.width * py;
-
-		// float depth = 1.0f;
-		// uint64_t udepth = *((uint32_t*)&depth);
-		// uint32_t color = tileID * 123456;
-		// uint64_t pixel = (udepth << 32) | color;
-		
-		if(pixelID < 0 || pixelID >= uniforms.width * uniforms.height) return;
-		
-		atomicMin(&framebuffer[pixelID], closest);
-	});
-
-
 	// transfer points to main framebuffer
-	if(false)
-	processRange(uniforms.width * uniforms.height, [&](int pixelID){
+	// if(false)
+	// processRange(uniforms.width * uniforms.height, [&](int pixelID){
 
-		// atomicMin(&framebuffer[pixelID], fb_points[pixelID]);
-		uint64_t closest = uint64_t(Infinity) << 32;
+	// 	// atomicMin(&framebuffer[pixelID], fb_points[pixelID]);
+	// 	uint64_t closest = uint64_t(Infinity) << 32;
 
-		int x = pixelID % int(uniforms.width);
-		int y = pixelID / int(uniforms.width);
+	// 	int x = pixelID % int(uniforms.width);
+	// 	int y = pixelID / int(uniforms.width);
 
-		int radius = 1;
-		for(int ox = -radius; ox <= radius; ox++)
-		for(int oy = -radius; oy <= radius; oy++)
-		// for(int ox : {0})
-		// for(int oy : {0})
-		{
-			int px = x + ox;
-			int py = y + oy;
+	// 	int radius = 1;
+	// 	for(int ox = -radius; ox <= radius; ox++)
+	// 	for(int oy = -radius; oy <= radius; oy++)
+	// 	// for(int ox : {0})
+	// 	// for(int oy : {0})
+	// 	{
+	// 		int px = x + ox;
+	// 		int py = y + oy;
 
-			if(px < 0 || px >= uniforms.width) continue;
-			if(py < 0 || py >= uniforms.width) continue;
+	// 		if(px < 0 || px >= uniforms.width) continue;
+	// 		if(py < 0 || py >= uniforms.width) continue;
 
-			int pid = px + int(uniforms.width) * py;
+	// 		int pid = px + int(uniforms.width) * py;
 
-			uint64_t value = fb_points[pid];
+	// 		uint64_t value = fb_points[pid];
 
-			closest = min(closest, value);
-		}
+	// 		closest = min(closest, value);
+	// 	}
 
-		atomicMin(&framebuffer[pixelID], closest);
-	});
+	// 	atomicMin(&framebuffer[pixelID], closest);
+	// });
 
-	if(uniforms.vrEnabled)
-	processRange(uniforms.vr_left_width * uniforms.vr_left_height, [&](int pixelID){
+	// resolve point buffers for vr
+	// if(uniforms.vrEnabled){
+	// 	processRange(uniforms.vr_left_width * uniforms.vr_left_height, [&](int pixelID){
 
-		// atomicMin(&framebuffer[pixelID], fb_points[pixelID]);
-		uint64_t closest = uint64_t(Infinity) << 32;
+	// 		// atomicMin(&framebuffer[pixelID], fb_points[pixelID]);
+	// 		uint64_t closest = uint64_t(Infinity) << 32;
 
-		int x = pixelID % int(uniforms.vr_left_width);
-		int y = pixelID / int(uniforms.vr_left_width);
+	// 		int x = pixelID % int(uniforms.vr_left_width);
+	// 		int y = pixelID / int(uniforms.vr_left_width);
 
-		int radius = 3;
-		for(int ox = -radius; ox <= radius; ox++)
-		for(int oy = -radius; oy <= radius; oy++)
-		{
-			int px = x + ox;
-			int py = y + oy;
+	// 		int radius = 3;
+	// 		for(int ox = -radius; ox <= radius; ox++)
+	// 		for(int oy = -radius; oy <= radius; oy++)
+	// 		{
+	// 			int px = x + ox;
+	// 			int py = y + oy;
 
-			if(px < 0 || px >= uniforms.vr_left_width) continue;
-			if(py < 0 || py >= uniforms.vr_left_width) continue;
+	// 			if(px < 0 || px >= uniforms.vr_left_width) continue;
+	// 			if(py < 0 || py >= uniforms.vr_left_width) continue;
 
-			int pid = px + int(uniforms.vr_left_width) * py;
+	// 			int pid = px + int(uniforms.vr_left_width) * py;
 
-			uint64_t value = fb_points_vr_left[pid];
+	// 			uint64_t value = fb_points_vr_left[pid];
 
-			closest = min(closest, value);
-		}
+	// 			closest = min(closest, value);
+	// 		}
 
-		atomicMin(&fb_vr_left[pixelID], closest);
-	});
+	// 		atomicMin(&fb_vr_left[pixelID], closest);
+	// 	});
 
-	if(uniforms.vrEnabled)
-	processRange(uniforms.vr_right_width * uniforms.vr_right_height, [&](int pixelID){
+	// 	processRange(uniforms.vr_right_width * uniforms.vr_right_height, [&](int pixelID){
 
-		// atomicMin(&framebuffer[pixelID], fb_points[pixelID]);
-		uint64_t closest = uint64_t(Infinity) << 32;
+	// 		// atomicMin(&framebuffer[pixelID], fb_points[pixelID]);
+	// 		uint64_t closest = uint64_t(Infinity) << 32;
 
-		int x = pixelID % int(uniforms.vr_right_width);
-		int y = pixelID / int(uniforms.vr_right_width);
+	// 		int x = pixelID % int(uniforms.vr_right_width);
+	// 		int y = pixelID / int(uniforms.vr_right_width);
 
-		int radius = 3;
-		for(int ox = -radius; ox <= radius; ox++)
-		for(int oy = -radius; oy <= radius; oy++)
-		{
-			int px = x + ox;
-			int py = y + oy;
+	// 		int radius = 3;
+	// 		for(int ox = -radius; ox <= radius; ox++)
+	// 		for(int oy = -radius; oy <= radius; oy++)
+	// 		{
+	// 			int px = x + ox;
+	// 			int py = y + oy;
 
-			if(px < 0 || px >= uniforms.vr_right_width) continue;
-			if(py < 0 || py >= uniforms.vr_right_width) continue;
+	// 			if(px < 0 || px >= uniforms.vr_right_width) continue;
+	// 			if(py < 0 || py >= uniforms.vr_right_width) continue;
 
-			int pid = px + int(uniforms.vr_right_width) * py;
+	// 			int pid = px + int(uniforms.vr_right_width) * py;
 
-			uint64_t value = fb_points_vr_right[pid];
+	// 			uint64_t value = fb_points_vr_right[pid];
 
-			closest = min(closest, value);
-		}
+	// 			closest = min(closest, value);
+	// 		}
 
-		atomicMin(&fb_vr_right[pixelID], closest);
-	});
+	// 		atomicMin(&fb_vr_right[pixelID], closest);
+	// 	});
+	// }
 
 	// if(grid.thread_rank() == 0){
 	// 	drawBoundingBox({-2.0f, 0.0f, 0.0f}, {0.5f, 1.0f, 1.5f}, 0x000000ff);
