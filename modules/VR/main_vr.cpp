@@ -48,6 +48,10 @@ CuFramebuffer framebuffer;
 CuFramebuffer fb_vr_left;
 CuFramebuffer fb_vr_right;
 
+CuFramebuffer fb_points;
+CuFramebuffer fb_points_vr_left;
+CuFramebuffer fb_points_vr_right;
+
 Skybox skybox;
 
 View viewLeft;
@@ -235,6 +239,10 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 	resizeFramebuffer(fb_vr_left, viewLeft.framebuffer->width, viewLeft.framebuffer->height);
 	resizeFramebuffer(fb_vr_right, viewRight.framebuffer->width, viewRight.framebuffer->height);
 
+	resizeFramebuffer(fb_points, renderer->width, renderer->height);
+	resizeFramebuffer(fb_points_vr_left, viewLeft.framebuffer->width, viewLeft.framebuffer->height);
+	resizeFramebuffer(fb_points_vr_right, viewRight.framebuffer->width, viewRight.framebuffer->height);
+
 	cuGraphicsGLRegisterImage(
 		&cugl_main, 
 		renderer->view.framebuffer->colorAttachments[0]->handle, 
@@ -289,8 +297,16 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 		&uniforms, &cptr_buffer, 
 		&output_main, &output_vr_left, &output_vr_right,
 		&framebuffer.cptr, &fb_vr_left.cptr, &fb_vr_right.cptr,
+		&fb_points.cptr, &fb_points_vr_left.cptr, &fb_points_vr_right.cptr,
 		&model->numTriangles, &cptr_positions, &cptr_uvs, &cptr_colors,
 		&cptr_texture, &skybox,
+		&physx_positions, &physx_numParticles
+	};
+
+	void* args_resolve_points[] = {
+		&uniforms, &cptr_buffer, 
+		&fb_points.cptr, &fb_points_vr_left.cptr, &fb_points_vr_right.cptr,
+		&framebuffer.cptr, &fb_vr_left.cptr, &fb_vr_right.cptr,
 		&physx_positions, &physx_numParticles
 	};
 
@@ -307,6 +323,7 @@ void renderCUDA(shared_ptr<GLRenderer> renderer){
 	};
 
 	cuda_program->launch("kernel", args_with_phsx, {.blockSize = 256});
+	cuda_program->launch("kernel_resolve_pointsToSpheres", args_resolve_points, {.blockSize = 256});
 	cuda_program->launch("kernel_draw_skybox", args, launchSettings);
 	cuda_program->launch("kernel_toOpenGL", args, launchSettings);
 
@@ -349,6 +366,7 @@ void initCudaProgram(
 		},
 		.kernels = {
 			"kernel", 
+			"kernel_resolve_pointsToSpheres",
 			"kernel_draw_skybox", 
 			"kernel_toOpenGL"
 		}
