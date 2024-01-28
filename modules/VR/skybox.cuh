@@ -12,9 +12,9 @@ void drawSkybox(
 	auto projToWorld = [&](float4 pos) -> float4{
 		float4 viewspace = proj_inv * pos;
 
-		if(!uniforms.vrEnabled){
+		// if(!uniforms.vrEnabled){
 			viewspace = viewspace / viewspace.w;
-		}
+		// }
 
 		return view_inv * viewspace;
 	};

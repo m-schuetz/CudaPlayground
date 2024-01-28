@@ -133,9 +133,9 @@ void kernel_resolve_pointsToSpheres(
 	auto projToWorld = [&](float4 pos) -> float4{
 		float4 viewspace = uniforms.proj_inv * pos;
 
-		if(!uniforms.vrEnabled){
+		// if(!uniforms.vrEnabled){
 			viewspace = viewspace / viewspace.w;
-		}
+		// }
 
 		return uniforms.view_inv * viewspace;
 	};
@@ -412,9 +412,9 @@ void kernel(
 		if(uniforms.vrEnabled){
 			clearBuffer_u64(fb_points_vr_left, clearValue, uniforms.vr_left_width * uniforms.vr_left_height);
 			clearBuffer_u64(fb_points_vr_right, clearValue, uniforms.vr_right_width * uniforms.vr_right_height);
-		}else{
-			clearBuffer_u64(fb_points, clearValue, uniforms.width * uniforms.height);
 		}
+		
+		clearBuffer_u64(fb_points, clearValue, uniforms.width * uniforms.height);
 	}
 
 	struct{
@@ -601,9 +601,9 @@ void kernel(
 			rasterizeTriangles(triangles, fb_vr_left, rs_left);
 			grid.sync();
 			rasterizeTriangles(triangles, fb_vr_right, rs_right);
-		}else{
-			rasterizeTriangles(triangles, framebuffer, rs_main);
 		}
+		
+		rasterizeTriangles(triangles, framebuffer, rs_main);
 	}
 
 	grid.sync();
@@ -718,10 +718,12 @@ void kernel(
 				rs_left.world = rot * uniforms.vr_left_controller_pose.transpose() 
 					* mat4::scale(sController, sController, sController);
 				rs_right.world = rs_left.world;
+				rs_main.world = rs_left.world;
 
 				if(uniforms.vr_left_controller_active){
 					rasterizeTriangles(triangles, fb_vr_left, rs_left);
 					rasterizeTriangles(triangles, fb_vr_right, rs_right);
+					rasterizeTriangles(triangles, framebuffer, rs_main);
 				}
 
 				grid.sync();
@@ -729,10 +731,12 @@ void kernel(
 				rs_left.world = rot * uniforms.vr_right_controller_pose.transpose() 
 					* mat4::scale(sController, sController, sController);
 				rs_right.world = rs_left.world;
+				rs_main.world = rs_left.world;
 
 				if(uniforms.vr_right_controller_active){
 					rasterizeTriangles(triangles, fb_vr_left, rs_left);
 					rasterizeTriangles(triangles, fb_vr_right, rs_right);
+					rasterizeTriangles(triangles, framebuffer, rs_main);
 				}
 			}else{
 				rs_main.world = translate * wiggle * wiggle_yaw * rot * scale;
@@ -958,35 +962,49 @@ void kernel_draw_skybox(
 	uint32_t* textureData,
 	const Skybox skybox
 ){
-	if(uniforms.vrEnabled){
+	// if(uniforms.vrEnabled){
 
-		// TODO
-		drawSkybox(
-			uniforms.vr_left_proj, uniforms.vr_left_view, 
-			uniforms.vr_left_proj_inv, uniforms.vr_left_view_inv, 
-			fb_vr_left, 
-			uniforms.vr_left_width, uniforms.vr_left_height, 
-			skybox
-		);
+	// 	// TODO
+	// 	drawSkybox(
+	// 		uniforms.vr_left_proj, uniforms.vr_left_view, 
+	// 		uniforms.vr_left_proj_inv, uniforms.vr_left_view_inv, 
+	// 		fb_vr_left, 
+	// 		uniforms.vr_left_width, uniforms.vr_left_height, 
+	// 		skybox
+	// 	);
 
-		drawSkybox(
-			uniforms.vr_right_proj, uniforms.vr_right_view, 
-			uniforms.vr_right_proj_inv, uniforms.vr_right_view_inv, 
-			fb_vr_right, 
-			uniforms.vr_right_width, uniforms.vr_right_height, 
-			skybox
-		);
+	// 	drawSkybox(
+	// 		uniforms.vr_right_proj, uniforms.vr_right_view, 
+	// 		uniforms.vr_right_proj_inv, uniforms.vr_right_view_inv, 
+	// 		fb_vr_right, 
+	// 		uniforms.vr_right_width, uniforms.vr_right_height, 
+	// 		skybox
+	// 	);
 		
-		// if(grid.thread_rank() == 0){
-		// 	mat4 mat = uniforms.vr_right_proj_inv;
-		// 	printf("===========\n");
-		// 	printf("%5.1f, %5.1f, %5.1f, %5.1f \n", mat[0].x, mat[0].y, mat[0].z, mat[0].w);
-		// 	printf("%5.1f, %5.1f, %5.1f, %5.1f \n", mat[1].x, mat[1].y, mat[1].z, mat[1].w);
-		// 	printf("%5.1f, %5.1f, %5.1f, %5.1f \n", mat[2].x, mat[2].y, mat[2].z, mat[2].w);
-		// 	printf("%5.1f, %5.1f, %5.1f, %5.1f \n", mat[3].x, mat[3].y, mat[3].z, mat[3].w);
-		// }
+	// 	// if(grid.thread_rank() == 0){
+	// 	// 	mat4 mat = uniforms.vr_right_proj_inv;
+	// 	// 	printf("===========\n");
+	// 	// 	printf("%5.1f, %5.1f, %5.1f, %5.1f \n", mat[0].x, mat[0].y, mat[0].z, mat[0].w);
+	// 	// 	printf("%5.1f, %5.1f, %5.1f, %5.1f \n", mat[1].x, mat[1].y, mat[1].z, mat[1].w);
+	// 	// 	printf("%5.1f, %5.1f, %5.1f, %5.1f \n", mat[2].x, mat[2].y, mat[2].z, mat[2].w);
+	// 	// 	printf("%5.1f, %5.1f, %5.1f, %5.1f \n", mat[3].x, mat[3].y, mat[3].z, mat[3].w);
+	// 	// }
 
-	}else{
+	// }
+
+	// if(cg::this_grid().thread_rank() == 0){
+	// 	// printf("%f, %f \n", uniforms.width, uniforms.height);
+
+	// 	mat4 mat = uniforms.view_inv;
+	// 	printf("=====================\n");
+	// 	printf("%6.1f, %6.1f, %6.1f, %6.1f\n", mat[0].x, mat[0].y, mat[0].z, mat[0].w);
+	// 	printf("%6.1f, %6.1f, %6.1f, %6.1f\n", mat[1].x, mat[1].y, mat[1].z, mat[1].w);
+	// 	printf("%6.1f, %6.1f, %6.1f, %6.1f\n", mat[2].x, mat[2].y, mat[2].z, mat[2].w);
+	// 	printf("%6.1f, %6.1f, %6.1f, %6.1f\n", mat[3].x, mat[3].y, mat[3].z, mat[3].w);
+		
+	// }
+	
+	{
 		drawSkybox(
 			uniforms.proj, uniforms.view, 
 			uniforms.proj_inv, uniforms.view_inv, 
@@ -1016,7 +1034,9 @@ void kernel_toOpenGL(
 	const Skybox skybox
 ){
 	// TRANSFER TO OPENGL TEXTURE
-	if(uniforms.vrEnabled){
+	// if(uniforms.vrEnabled)
+	if(false)
+	{
 		
 		// left
 		processRange(0, uniforms.vr_left_width * uniforms.vr_left_height, [&](int pixelIndex){
