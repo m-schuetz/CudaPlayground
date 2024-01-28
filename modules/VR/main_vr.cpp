@@ -388,49 +388,63 @@ PxVec3 cubeVertices[] = { PxVec3(0.5f, -0.5f, -0.5f), PxVec3(0.5f, -0.5f, 0.5f),
 
 PxU32 cubeIndices[] = { 1, 2, 3,  7, 6, 5,  4, 5, 1,  5, 6, 2,  2, 6, 7,  0, 3, 7,  0, 1, 3,  4, 7, 5,  0, 4, 1,  1, 5, 2,  3, 2, 7,  4, 0, 7 };
 
-static void initParticles()
+enum ParticleTypes
+{
+	eWater = 0,
+	eSand = 1,
+};
+
+static void initParticles(ParticleTypes particleType)
 {
 	PxCudaContextManager* cudaContextManager = gScene->getCudaContextManager();
 	if (cudaContextManager == NULL)
 		return;
 
-	const PxU32 numX = 50;
-	//const PxU32 numY = 120;  // for fluid
-	const PxU32 numY = 200;  // for granular
-	const PxU32 numZ = 30;
 	const PxVec3 position(0.0f, 0.0f, 0.0f);
-	// const PxReal particleSpacing = 0.1f;  // for fluid
-	const PxReal particleSpacing = 0.03f;  // for granular
-	//const PxReal density = 1000.0f;  // for fluid
-	const PxReal density = 10'000.0f;  // for granular
-	const PxU32 maxParticles = numX * numY * numZ;
+
+	// fluid as default
+	const PxU32 numX = 50;
+	PxU32 numY = 120;  
+	const PxU32 numZ = 30;
+	PxReal particleSpacing = 0.1f;
+	PxReal density = 1000.0f;
 
 	// Material setup
-	// PxReal fluidFriction = 0.05f;
-	// PxReal fluidDamping = 0.05f;
-	// PxReal fluidAdhesion = 0.0f;
-	// PxReal fluidViscosity = 0.001f;
-	// PxReal fluidVorticityConfinement = 10.0f;
-	// PxReal fluidSurfaceTension = 0.00704f;
-	// PxReal fluidCohesion = 0.0704f;
-	// PxReal fluidLift = 0.0f;
-	// PxReal fluidDrag = 0.0f;
-	// PxPBDMaterial* fluidMat = gPhysics->createPBDMaterial(
-	// 	fluidFriction, fluidDamping, fluidAdhesion, fluidViscosity, fluidVorticityConfinement,
-	// 	fluidSurfaceTension, fluidCohesion, fluidLift, fluidDrag);
+	PxReal friction = 0.05f;
+	PxReal damping = 0.05f;
+	PxReal adhesion = 0.0f;
+	PxReal viscosity = 0.001f;
+	PxReal vorticityConfinement = 10.0f;
+	PxReal surfaceTension = 0.00704f;
+	PxReal cohesion = 0.0704f;
+	PxReal lift = 0.0f;
+	PxReal drag = 0.0f;
 
-	PxReal granularFriction = 1500000.0f;
-	PxReal granularDamping = 0.25f;
-	PxReal granularAdhesion = 10.1f;
-	PxReal granularViscosity = 1000.0f;
-	PxReal granularVorticityConfinement = 0.0f;
-	PxReal granularSurfaceTension = 0.0f;
-	PxReal granularCohesion = 10000.0f;
-	PxReal granularLift = 0.0f;
-	PxReal granularDrag = 0.0f;
+	PxParticlePhaseFlags phaseFlag = PxParticlePhaseFlags(
+		PxParticlePhaseFlag::eParticlePhaseFluid | 
+		PxParticlePhaseFlag::eParticlePhaseSelfCollide
+	);
+
+	if (particleType == ParticleTypes::eSand)
+	{
+		numY = 200;
+		particleSpacing = 0.03f;
+		density = 10'000.0f;
+		friction = 1500000.0f;
+		damping = 0.25f;
+		adhesion = 10.1f;
+		viscosity = 1000.0f;
+		vorticityConfinement = 0.0f;
+		surfaceTension = 0.0f;
+		cohesion = 10000.0f;
+		lift = 0.0f;
+		drag = 0.0f;
+		phaseFlag = PxParticlePhaseFlag::eParticlePhaseSelfCollide;  // no Fluid / pressure
+	}
+
 	PxPBDMaterial* fluidMat = gPhysics->createPBDMaterial(
-		granularFriction, granularDamping, granularAdhesion, granularViscosity, granularVorticityConfinement,
-		granularSurfaceTension, granularCohesion, granularLift, granularDrag);
+		friction, damping, adhesion, viscosity, vorticityConfinement,
+		surfaceTension, cohesion, lift, drag);
 
 
 	PxPBDParticleSystem* particleSystem = gPhysics->createPBDParticleSystem(*cudaContextManager, 96);
@@ -452,13 +466,9 @@ static void initParticles()
 	gScene->addActor(*particleSystem);
 
 	// Create particles and add them to the particle system
-	PxParticlePhaseFlags phaseFlag = PxParticlePhaseFlags(
-		// PxParticlePhaseFlag::eParticlePhaseFluid |  // Enable for fluid particles
-		PxParticlePhaseFlag::eParticlePhaseSelfCollide
-	);
 	const PxU32 particlePhase = particleSystem->createPhase(fluidMat, phaseFlag);
 
-
+	const PxU32 maxParticles = numX * numY * numZ;
 	PxU32* phase = cudaContextManager->allocPinnedHostBuffer<PxU32>(maxParticles);
 	PxVec4* positionInvMass = cudaContextManager->allocPinnedHostBuffer<PxVec4>(maxParticles);
 	PxVec4* velocity = cudaContextManager->allocPinnedHostBuffer<PxVec4>(maxParticles);
@@ -537,7 +547,7 @@ void initPhysxScene()
 
 	initObstacles();
 	initControllers();
-	initParticles();
+	initParticles(ParticleTypes::eWater);
 
 	// Setup rigid bodies
 	// const PxReal boxSize = 0.75f;
@@ -666,14 +676,15 @@ void animateActorToTarget(PxRigidDynamic* actor, const PxVec3& targetPos, const 
 void handlePhysicsInputs(PxReal dt)
 {
 	float dist = 4.0f;
+	float height = -0.3f;
 	std::vector<PxVec3> targetPositions =
 	{
-			PxVec3(0.0f, 0.5f, 0.0f),
-			PxVec3(-dist, 0.5f, 0.0f),
-			PxVec3(-dist, 0.5f, -dist),
-			PxVec3(0.0f, 0.5f, -dist),
-			PxVec3(0.0f, 0.5f, -dist),
-			PxVec3(dist, 0.5f, -dist)
+			PxVec3(0.0f, height, 0.0f),
+			PxVec3(-dist, height, -dist),
+			PxVec3(dist, height, dist),
+			PxVec3(0.0f, height, -dist),
+			PxVec3(0.0f, height, -dist),
+			PxVec3(dist, height, -dist)
 	};
 	static uint32_t targetPosId = 0;
 	static PxReal dtAccu = 0;
@@ -689,26 +700,44 @@ void handlePhysicsInputs(PxReal dt)
 	{
 		if (gControllerBodies[controllerId])
 		{	
-			// TODO: use actual controller position
 			uint32_t targetPosIdController = targetPosId + controllerId % targetPositions.size();
 			animateActorToTarget(gControllerBodies[controllerId], targetPositions[targetPosIdController], dt);
 		}
 	}
 
-	// doesn't work like this. raises error, probably because the buffer is read-only
-	// printf("before\n");
-	// PxVec4* positionsInvMasses = gParticleBuffer->getPositionInvMasses();
-	// uint32_t numParticlesToMove = gParticleBuffer->getNbActiveParticles() / 10;
-	// for (PxU32 i = 0; i < numParticlesToMove; ++i)
-	// {
-	// 	auto moveParticleId = std::rand() % gParticleBuffer->getNbActiveParticles();
-	// 	PxTransform targetPose = gControllerBodies[0]->getGlobalPose();
-	// 	printf("try to set particle\n");
-	// 	positionsInvMasses[moveParticleId].x = targetPose.p.x;
-	// 	positionsInvMasses[moveParticleId].y = targetPose.p.y;
-	// 	positionsInvMasses[moveParticleId].z = targetPose.p.z;
-	// }
-	// printf("after\n");
+	/*
+	PxCudaContextManager* cudaContextManager = gScene->getCudaContextManager();
+	cudaContextManager->acquireContext();
+
+	PxU32 numActiveParticles = gParticleBuffer->getNbActiveParticles();
+	PxVec4* posInvMass = gParticleBuffer->getPositionInvMasses();
+	PxVec4* velocities = gParticleBuffer->getVelocities();
+
+	// TODO: try PxVec4* posInvMassHost = cudaContextManager->allocPinnedHostBuffer<PxVec4>(numActiveParticles);
+	PxVec4* posInvMassHost = new PxVec4[numActiveParticles];
+
+	PxCudaContext* cudaContext = cudaContextManager->getCudaContext();
+	cudaContext->memcpyDtoH(posInvMassHost, CUdeviceptr(posInvMass), numActiveParticles * sizeof(PxVec4));
+
+	static PxReal particlesAccu = 0.0f;
+	static PxReal particlesPerSecond = 500.0f;
+	particlesAccu += particlesPerSecond * dt;
+	uint32_t particlesThisStep = int(particlesAccu);
+	for (PxU32 i = 0; i < particlesThisStep; ++i)
+	{
+		particlesAccu -= 1.0f;
+		auto moveParticleId = std::rand() % gParticleBuffer->getNbActiveParticles();
+		PxTransform targetPose = gControllerBodies[0]->getGlobalPose();
+		//printf("try to set particle\n");
+		posInvMassHost[moveParticleId].x = targetPose.p.x;
+		posInvMassHost[moveParticleId].y = targetPose.p.y;
+		posInvMassHost[moveParticleId].z = targetPose.p.z;
+	}
+
+	cudaContext->memcpyHtoDAsync(CUdeviceptr(posInvMass), posInvMassHost, numActiveParticles * sizeof(PxVec4), 0);
+	cudaContext->streamSynchronize(0);
+	cudaContextManager->releaseContext();
+	*/
 }
 
 void updatePhysx(shared_ptr<GLRenderer> renderer) 
@@ -731,20 +760,6 @@ void updatePhysx(shared_ptr<GLRenderer> renderer)
 
 		accumulatedTime -= updateEvery;
 	}
-
-}
-
-void allocParticleBuffers()
-{
-	PxScene* scene;
-	PxGetPhysics().getScenes(&scene, 1);
-	PxCudaContextManager* cudaContextManager = scene->getCudaContextManager();
-
-	PxU32 maxParticles = gParticleBuffer->getMaxParticles();
-
-	// TODO: replace with own buffer
-	// sPosBuffer.initialize(cudaContextManager);
-	// sPosBuffer.allocate(maxParticles * sizeof(PxVec4));
 
 }
 
@@ -780,8 +795,6 @@ void cleanupPhysics(bool /*interactive*/)
 int main(){
 
 	initPhysx();
-
-	
 
 	cout << std::setprecision(2) << std::fixed;
 	setlocale( LC_ALL, "en_AT.UTF-8" );
