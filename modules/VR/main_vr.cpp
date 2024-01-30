@@ -83,6 +83,8 @@ static PxMaterial*				gMaterial	= NULL;
 static PxPBDParticleSystem*		gParticleSystem = NULL;
 static PxParticleBuffer*		gParticleBuffer = NULL;
 static PxRigidDynamic*			gControllerBodies[2] = { NULL, NULL };
+static PxVec4*					gPosInvMassHost = NULL;
+static PxVec4*					gVelocityHost = NULL;
 
 struct{
 	bool measureLaunchDurations = false;
@@ -472,6 +474,8 @@ static void initParticles(ParticleTypes particleType)
 	PxU32* phase = cudaContextManager->allocPinnedHostBuffer<PxU32>(maxParticles);
 	PxVec4* positionInvMass = cudaContextManager->allocPinnedHostBuffer<PxVec4>(maxParticles);
 	PxVec4* velocity = cudaContextManager->allocPinnedHostBuffer<PxVec4>(maxParticles);
+	gPosInvMassHost = cudaContextManager->allocPinnedHostBuffer<PxVec4>(maxParticles);  // pinned necessary?
+	gVelocityHost = cudaContextManager->allocPinnedHostBuffer<PxVec4>(maxParticles);  // pinned necessary?
 
 	PxReal x = position.x;
 	PxReal y = position.y;
@@ -660,50 +664,17 @@ void updateActor(PxRigidDynamic* actor, PxTransform targetPose)
 
 }
 
-void animateActorToTarget(PxRigidDynamic* actor, const PxVec3& targetPos, const PxReal dt)
-{
-	const PxVec3 actorPos = actor->getGlobalPose().p;
-	const PxVec3 dir = targetPos - actorPos;
-	const PxReal dist = dir.magnitude();
-	const PxReal maxSpeed = 2.0f;
-	const PxReal maxDistDelta = maxSpeed * dt;
-	if (dist > maxDistDelta)
-		updateActor(actor, PxTransform(actorPos + dir * (maxDistDelta / dist)));
-	else
-		updateActor(actor, PxTransform(targetPos));
-}
-
 void handlePhysicsInputs(PxReal dt)
 {
 	float dist = 4.0f;
-	float height = -0.3f;
-	std::vector<PxVec3> targetPositions =
-	{
-			PxVec3(0.0f, height, 0.0f),
-			PxVec3(-dist, height, -dist),
-			PxVec3(dist, height, dist),
-			PxVec3(0.0f, height, -dist),
-			PxVec3(0.0f, height, -dist),
-			PxVec3(dist, height, -dist)
-	};
-	static uint32_t targetPosId = 0;
-	static PxReal dtAccu = 0;
+	float height = 0.5f;
+	static PxReal animPhase = 0;
 
-	dtAccu += dt;
-	if (dtAccu > 3.0f)
+	animPhase += dt;
+	if (animPhase > 2.0f * PxPi)
 	{
-		dtAccu = 0;
-		targetPosId++;
+		animPhase -= 2.0f * PxPi;
 	}
-
-	// for (int controllerId = 0; controllerId < 2; ++controllerId)
-	// {
-	// 	if (gControllerBodies[controllerId])
-	// 	{	
-	// 		uint32_t targetPosIdController = targetPosId + controllerId % targetPositions.size();
-	// 		animateActorToTarget(gControllerBodies[controllerId], targetPositions[targetPosIdController], dt);
-	// 	}
-	// }
 
 	if (ovr && ovr->isActive()) {
 
@@ -748,24 +719,30 @@ void handlePhysicsInputs(PxReal dt)
 			auto actor = gControllerBodies[1];
 			actor->setKinematicTarget(phsyxPose);
 		}
-
+	}
+	else {
+		for (int controllerId = 0; controllerId < 2; ++controllerId)
+		{
+			if (gControllerBodies[controllerId])
+			{	
+				PxVec3 targetPos(sin(animPhase + controllerId * PxPi) * dist, height, cos(animPhase + controllerId * PxPi) * dist);
+				updateActor(gControllerBodies[controllerId], PxTransform(targetPos));
+			}
+		}
 	}
 
+	float offset = 0.5f;
+	auto makeRandOffset = [](float offset) { return (rand() % 1000 / 1000.0f - 0.5f) * offset; };
 
-
-	/*
 	PxCudaContextManager* cudaContextManager = gScene->getCudaContextManager();
-	cudaContextManager->acquireContext();
 
 	PxU32 numActiveParticles = gParticleBuffer->getNbActiveParticles();
 	PxVec4* posInvMass = gParticleBuffer->getPositionInvMasses();
 	PxVec4* velocities = gParticleBuffer->getVelocities();
 
-	// TODO: try PxVec4* posInvMassHost = cudaContextManager->allocPinnedHostBuffer<PxVec4>(numActiveParticles);
-	PxVec4* posInvMassHost = new PxVec4[numActiveParticles];
-
 	PxCudaContext* cudaContext = cudaContextManager->getCudaContext();
-	cudaContext->memcpyDtoH(posInvMassHost, CUdeviceptr(posInvMass), numActiveParticles * sizeof(PxVec4));
+	cudaContext->memcpyDtoH(gPosInvMassHost, CUdeviceptr(posInvMass), numActiveParticles * sizeof(PxVec4));
+	cudaContext->memcpyDtoH(gVelocityHost, CUdeviceptr(velocities), numActiveParticles * sizeof(PxVec4));
 
 	static PxReal particlesAccu = 0.0f;
 	static PxReal particlesPerSecond = 500.0f;
@@ -776,21 +753,24 @@ void handlePhysicsInputs(PxReal dt)
 		particlesAccu -= 1.0f;
 		auto moveParticleId = std::rand() % gParticleBuffer->getNbActiveParticles();
 		PxTransform targetPose = gControllerBodies[0]->getGlobalPose();
-		//printf("try to set particle\n");
-		posInvMassHost[moveParticleId].x = targetPose.p.x;
-		posInvMassHost[moveParticleId].y = targetPose.p.y;
-		posInvMassHost[moveParticleId].z = targetPose.p.z;
+		gPosInvMassHost[moveParticleId].x = targetPose.p.x + makeRandOffset(offset);
+		gPosInvMassHost[moveParticleId].y = targetPose.p.y + 1.0f + makeRandOffset(offset);
+		gPosInvMassHost[moveParticleId].z = targetPose.p.z + makeRandOffset(offset);
+		gVelocityHost[moveParticleId].x = makeRandOffset(offset);
+		gVelocityHost[moveParticleId].y = 15.5f + makeRandOffset(offset);
+		gVelocityHost[moveParticleId].z = makeRandOffset(offset);
 	}
 
-	cudaContext->memcpyHtoDAsync(CUdeviceptr(posInvMass), posInvMassHost, numActiveParticles * sizeof(PxVec4), 0);
-	cudaContext->streamSynchronize(0);
-	cudaContextManager->releaseContext();
-	*/
+	cudaContext->memcpyHtoD(CUdeviceptr(posInvMass), gPosInvMassHost, numActiveParticles * sizeof(PxVec4));
+	gParticleBuffer->raiseFlags(PxParticleBufferFlag::eUPDATE_POSITION);
+
+	cudaContext->memcpyHtoD(CUdeviceptr(velocities), gVelocityHost, numActiveParticles * sizeof(PxVec4));
+	gParticleBuffer->raiseFlags(PxParticleBufferFlag::eUPDATE_VELOCITY);
 }
 
 void updatePhysx(shared_ptr<GLRenderer> renderer) 
 {
-	onBeforeRenderParticles();
+	//onBeforeRenderParticles();
 
 	static double accumulatedTime = 0.0f;
 	double updateEvery = 1.0 / 120.0;
@@ -811,28 +791,11 @@ void updatePhysx(shared_ptr<GLRenderer> renderer)
 
 }
 
-void renderPhysx() 
-{
-	// onBeforeRenderParticles(); // really before stepping? not here?
-
-	// TODO: render particles
-
-	PxScene* scene;
-	PxGetPhysics().getScenes(&scene, 1);
-	PxU32 nbActors = scene->getNbActors(PxActorTypeFlag::eRIGID_DYNAMIC | PxActorTypeFlag::eRIGID_STATIC);
-	if (nbActors)
-	{
-		std::vector<PxRigidActor*> actors(nbActors);
-		scene->getActors(PxActorTypeFlag::eRIGID_DYNAMIC | PxActorTypeFlag::eRIGID_STATIC, reinterpret_cast<PxActor**>(&actors[0]), nbActors);
-		// TODO: replace with own rendering
-		// Snippets::renderActors(&actors[0], static_cast<PxU32>(actors.size()), true);
-	}
-
-
-}
-
 void cleanupPhysics(bool /*interactive*/)
 {
+	PxCudaContextManager* cudaContextManager = gScene->getCudaContextManager();
+	cudaContextManager->freePinnedHostBuffer(gPosInvMassHost);
+	cudaContextManager->freePinnedHostBuffer(gVelocityHost);
 	PX_RELEASE(gScene);
 	PX_RELEASE(gDispatcher);
 	PX_RELEASE(gPhysics);
