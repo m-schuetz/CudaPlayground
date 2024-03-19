@@ -156,6 +156,28 @@ constexpr float PI = 3.1415;
 constexpr uint32_t BACKGROUND_COLOR = 0x00332211ull;
 constexpr uint64_t DEFAULT_FRAGMENT = (uint64_t(Infinity) << 32ull) | uint64_t(BACKGROUND_COLOR);
 
+// from three.js
+// https://github.com/mrdoob/three.js/blob/dev/src/math/Ray.js
+// License: MIT (https://github.com/mrdoob/three.js/blob/dev/LICENSE)
+float raySphereIntersection(float3 origin, float3 dir, float3 spherePos, float radius) {
+
+	float3 origToSphere = spherePos - origin;
+	float tca = dot(origToSphere, dir);
+	float d2 = dot(origToSphere, origToSphere) - tca * tca;
+	float radius2 = radius * radius;
+
+	if(d2 > radius2) return -1.0f;
+
+	float thc = sqrt(radius2 - d2);
+	float t0 = tca - thc;
+	float t1 = tca + thc;
+
+	if(t1 < 0) return -1.0f;
+	if(t0 < 0) return t1;
+
+	return t0;
+}
+
 // see https://www.cs.princeton.edu/courses/archive/fall00/cs426/lectures/raycast/sld017.htm
 float intersect_plane(float3 origin, float3 direction, float3 N, float d) {
 	float t = -(dot(origin, N) + d) / dot(direction, N);
@@ -524,6 +546,187 @@ void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, Rasterizati
 	// }
 }
 
+void rasterizeSplat(float3 position, float3 N, float size, uint32_t color, uint64_t* framebuffer, mat4 world){
+
+	auto grid = cg::this_grid();
+	auto block = cg::this_thread_block();
+
+	// prepare some stuff for ray casting
+	auto projToWorld = [&](float4 pos) -> float4{
+		float4 viewspace = uniforms.projInverse * pos;
+
+		// if(!uniforms.vrEnabled){
+			viewspace = viewspace / viewspace.w;
+		// }
+
+		return uniforms.viewInverse * viewspace;
+	};
+
+	float4 origin_projspace = uniforms.proj * float4{0.0f, 0.0f, 0.0f, 1.0f};
+	float4 dir_00_projspace = float4{-1.0f, -1.0f, 0.0f, 1.0f};
+	float4 dir_01_projspace = float4{-1.0f,  1.0f, 0.0f, 1.0f};
+	float4 dir_10_projspace = float4{ 1.0f, -1.0f, 0.0f, 1.0f};
+	float4 dir_11_projspace = float4{ 1.0f,  1.0f, 0.0f, 1.0f};
+
+	float4 origin_worldspace = projToWorld(origin_projspace);
+	float4 dir_00_worldspace = projToWorld(dir_00_projspace);
+	float4 dir_01_worldspace = projToWorld(dir_01_projspace);
+	float4 dir_10_worldspace = projToWorld(dir_10_projspace);
+	float4 dir_11_worldspace = projToWorld(dir_11_projspace);
+
+	mat4 transform = viewProj * world;
+	float3 T1 = {N.x, N.z, N.y};
+	float3 T2 = {N.z, N.y, N.x};
+
+	float r = size;
+
+	float3 samples[5] = {
+		position, 
+		float3{position.x + r * (-T1.x + T2.x), position.y + r * (-T1.y + T2.y), position.z + r * (-T1.z + T2.z)},
+		float3{position.x + r * (-T1.x - T2.x), position.y + r * (-T1.y - T2.y), position.z + r * (-T1.z - T2.z)},
+		float3{position.x + r * (+T1.x + T2.x), position.y + r * (+T1.y + T2.y), position.z + r * (+T1.z + T2.z)},
+		float3{position.x + r * (+T1.x - T2.x), position.y + r * (+T1.y - T2.y), position.z + r * (+T1.z - T2.z)},
+	};
+
+	float2 samples_screen[5];
+
+	float2 screen_min = {+Infinity, +Infinity};
+	float2 screen_max = {-Infinity, -Infinity};
+
+	for(int i = 0; i < 5; i++){
+
+		float3 sample = samples[i];
+		float4 ndc = transform * make_float4(sample, 1.0f);
+		ndc.x = ndc.x / ndc.w;
+		ndc.y = ndc.y / ndc.w;
+		ndc.z = ndc.z / ndc.w;
+
+		float2 imgPos = {
+			(ndc.x * 0.5f + 0.5f) * uniforms.width, 
+			(ndc.y * 0.5f + 0.5f) * uniforms.height,
+		};
+
+		samples_screen[i] = imgPos;
+
+		if(screen_min.x < 0.0f || screen_max.x >= uniforms.width) continue;
+		if(screen_min.y < 0.0f || screen_max.y >= uniforms.width) continue;
+		if(ndc.w <= 0.0) continue;
+		if(ndc.x < -1.0) continue;
+		if(ndc.x >  1.0) continue;
+		if(ndc.y < -1.0) continue;
+		if(ndc.y >  1.0) continue;
+
+		screen_min.x = min(screen_min.x, imgPos.x);
+		screen_min.y = min(screen_min.y, imgPos.y);
+		screen_max.x = max(screen_max.x, imgPos.x);
+		screen_max.y = max(screen_max.y, imgPos.y);
+
+	}
+
+	int safeguard = 0;
+	for(int ix = screen_min.x; ix <= ceil(screen_max.x); ix++)
+	for(int iy = screen_min.y; iy <= ceil(screen_max.y); iy++)
+	{
+
+		float u = float(ix) / uniforms.width;
+		float v = float(iy) / uniforms.height;
+
+		float A_00 = (1.0f - u) * (1.0f - v);
+		float A_01 = (1.0f - u) *         v;
+		float A_10 =         u  * (1.0f - v);
+		float A_11 =         u  *         v;
+
+		float3 dir = make_float3(
+			A_00 * dir_00_worldspace + 
+			A_01 * dir_01_worldspace + 
+			A_10 * dir_10_worldspace + 
+			A_11 * dir_11_worldspace - origin_worldspace);
+		dir = normalize(dir);
+		float3 origin = make_float3(origin_worldspace);
+
+		// float t = raySphereIntersection(origin, dir, position, size * 0.5f);
+		float t = intersect_plane(origin, dir, N, 0.0f);
+		float3 I = origin + t * dir;
+		float d = length(position - I);
+
+
+		uint8_t* rgba = (uint8_t*)&color;
+
+		// rgba[0] = 100.0f * t;
+		// rgba[1] = 100.0f * t;
+		// rgba[2] = 100.0f * t;
+
+		// TODO: ugly hack, why is 
+		float threshold = sqrt(size * size + size * size);
+		if(d > size){
+			// color = 0x0000ff00;
+			continue;
+		}else{
+			// color = 0x000000ff;
+		}
+
+
+		float depth = 100.0f; // TODO
+		uint64_t udepth = *((uint32_t*)&depth);
+
+		// uint64_t pixel = (udepth << 32ull) | index;
+		uint64_t pixel = (udepth << 32ull) | color;
+
+		int2 pixelCoords = make_int2(ix, iy);
+		int pixelID = pixelCoords.x + pixelCoords.y * uniforms.width;
+		pixelID = clamp(pixelID, 0, int(uniforms.width * uniforms.height) - 1);
+
+		atomicMin(&framebuffer[pixelID], pixel);
+
+
+		if(safeguard > 50'000) goto break_target;
+
+		safeguard++;
+	}
+
+	break_target:
+
+
+	// for(float3 sample : samples){
+
+	// 	mat4 transform = viewProj * world;
+
+	// 	float4 ndc = transform * make_float4(sample, 1.0f);
+	// 	ndc.x = ndc.x / ndc.w;
+	// 	ndc.y = ndc.y / ndc.w;
+	// 	ndc.z = ndc.z / ndc.w;
+
+	// 	if(ndc.w <= 0.0) return;
+	// 	if(ndc.x < -1.0) return;
+	// 	if(ndc.x >  1.0) return;
+	// 	if(ndc.y < -1.0) return;
+	// 	if(ndc.y >  1.0) return;
+
+	// 	float2 imgPos = {
+	// 		(ndc.x * 0.5f + 0.5f) * uniforms.width, 
+	// 		(ndc.y * 0.5f + 0.5f) * uniforms.height,
+	// 	};
+
+	// 	uint8_t* rgba = (uint8_t*)&color;
+
+	// 	float depth = ndc.w;
+	// 	uint64_t udepth = *((uint32_t*)&depth);
+
+	// 	// uint64_t pixel = (udepth << 32ull) | index;
+	// 	uint64_t pixel = (udepth << 32ull) | color;
+
+	// 	int2 pixelCoords = make_int2(imgPos.x, imgPos.y);
+	// 	int pixelID = pixelCoords.x + pixelCoords.y * uniforms.width;
+	// 	pixelID = clamp(pixelID, 0, int(uniforms.width * uniforms.height) - 1);
+
+	// 	atomicMin(&framebuffer[pixelID], pixel);
+
+	// }
+
+
+
+}
+
 // template <typename... Args>
 // inline void printfmt(const char* str, const Args&... args) {
 
@@ -560,25 +763,25 @@ void kernel(
 
 	viewProj = uniforms.proj * uniforms.view;
 
-	viewProj.rows[0] = { 1.484, -0.024, -0.004, -0.004};
-	viewProj.rows[1] = { 0.013,  2.193, -0.291, -0.291};
-	viewProj.rows[2] = { 0.011,  0.666,  0.957,  0.957};
-	viewProj.rows[3] = {-0.487, -4.415,  3.940,  3.958};
+	// viewProj.rows[0] = { 1.484, -0.024, -0.004, -0.004};
+	// viewProj.rows[1] = { 0.013,  2.193, -0.291, -0.291};
+	// viewProj.rows[2] = { 0.011,  0.666,  0.957,  0.957};
+	// viewProj.rows[3] = {-0.487, -4.415,  3.940,  3.958};
 
-	viewProj = viewProj.transpose();
-	viewProj.rows[1].x *= -1.0f;
-	viewProj.rows[1].y *= -1.0f;
-	viewProj.rows[1].z *= -1.0f;
-	viewProj.rows[1].w *= -1.0f;
+	// viewProj = viewProj.transpose();
+	// viewProj.rows[1].x *= -1.0f;
+	// viewProj.rows[1].y *= -1.0f;
+	// viewProj.rows[1].z *= -1.0f;
+	// viewProj.rows[1].w *= -1.0f;
 
-	if(grid.thread_rank() == 0){
-		cudaprint->set("test u32", 123);
-		cudaprint->set("test key", "abc value");
+	// if(grid.thread_rank() == 0){
+	// 	cudaprint->set("test u32", 123);
+	// 	cudaprint->set("test key", "abc value");
 
-		if(int(uniforms.time * 100.0) % 100 < 1){
-			cudaprint->print("-abc {:.2f} def- \n", 134.1f);
-		}
-	}
+	// 	if(int(uniforms.time * 100.0) % 100 < 1){
+	// 		cudaprint->print("-abc {:.2f} def- \n", 134.1f);
+	// 	}
+	// }
 
 
 	Allocator _allocator(buffer, 0);
@@ -790,6 +993,7 @@ void kernel(
 		// if(ndc.y < -1.0) return;
 		// if(ndc.y >  1.0) return;
 
+		if(false)
 		{
 			// float sd = max(abs(scale.x), max(abs(scale.y), abs(scale.z)));
 			// float splatSize = max(min(0.5f * sd, 20.0f), 1.0);
@@ -851,7 +1055,7 @@ void kernel(
 				int pixelID = pixelCoords.x + pixelCoords.y * uniforms.width;
 				pixelID = clamp(pixelID, 0, int(uniforms.width * uniforms.height) - 1);
 
-				// atomicMin(&framebuffer_2[pixelID], pixel);
+				atomicMin(&framebuffer_2[pixelID], pixel);
 			}
 		}
 
@@ -957,6 +1161,27 @@ void kernel(
 		// triangles->numTriangles = 1;
 
 		rasterizeTriangles(triangles, framebuffer_2, settings);
+	}
+
+	grid.sync();
+
+	if(grid.thread_rank() < 10'000)
+	{
+
+		float u = float(grid.thread_rank() % 100) / 100.0f;
+		float v = (float(grid.thread_rank()) / 100.0f) / 100.0f;
+
+		float x = 10.0f * u - 5.0f;
+		float y = 10.0f * v - 25.0f + 22;
+		float z = 0.0f;
+
+		mat4 world = mat4::identity();
+
+		uint32_t color = grid.thread_rank() * 1234567;
+
+		rasterizeSplat({x, y, z}, {0.0f, 0.0f, 1.0f}, 0.04f, color, framebuffer_2, world);
+
+
 	}
 
 	grid.sync();
