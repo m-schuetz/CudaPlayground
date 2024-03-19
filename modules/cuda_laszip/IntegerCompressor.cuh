@@ -30,7 +30,11 @@ struct IntegerCompressor{
 	ArithmeticModel** mBits;
 	ArithmeticModel** mCorrector;
 
-	IntegerCompressor(ArithmeticDecoder* dec, uint32_t bits = 16, uint32_t contexts = 1, uint32_t bits_high = 8, uint32_t range = 0){
+	IntegerCompressor(){
+		
+	}
+
+	void init(ArithmeticDecoder* dec, uint32_t bits = 16, uint32_t contexts = 1, uint32_t bits_high = 8, uint32_t range = 0){
 		this->dec = dec;
 		this->bits = bits;
 		this->contexts = contexts;
@@ -134,34 +138,57 @@ struct IntegerCompressor{
 	}
 
 	int32_t readCorrector(ArithmeticModel* mBits){
+		// auto block = cg::this_thread_block();
+		cg::coalesced_group active = cg::coalesced_threads();
+
 		int32_t c;
+		// uint32_t& cu = *((uint32_t*)&c);
 
 		uint64_t t_start = nanotime();
 
 		// decode within which interval the corrector is falling
 		k = dec->decodeSymbol(mBits);
+		// dec->decodeSymbol_warp(mBits, &k);
+
+		// if(active.thread_rank() == 0) k = res;
+
+		// if(active.thread_rank() != 0) return;
+
+		// if(block.thread_rank() > 0) return;
 
 		// decode the exact location of the corrector within the interval
 
+		// active.sync();
+		// printf("t: %2i, k: %u, #threads: %i \n", active.thread_rank(), k, active.num_threads());
+		// active.sync();
+
 		// then c is either smaller than 0 or bigger than 1
+		if(active.thread_rank() == 0)
 		if (k){
+			// if(active.thread_rank() == 0)
 			if (k < 32){
 
 				// for small k we can do this in one step
 				if (k <= bits_high){
 					// decompress c with the range coder
 					c = dec->decodeSymbol(mCorrector[k]);
+					// dec->decodeSymbol_warp(mCorrector[k], (uint32_t*)&c);
+
+					printf("c: %i \n", c);
 				}else{
 					// for larger k we need to do this in two steps
 					int k1 = k-bits_high;
 
 					// decompress higher bits with table
 					c = dec->decodeSymbol(mCorrector[k]);
+					// dec->decodeSymbol_warp(mCorrector[k], cu);
 
 					// read lower bits raw
-					int c1 = dec->readBits(k1);
-					// put the corrector back together
-					c = (c << k1) | c1;
+					if(active.thread_rank() == 0){
+						int c1 = dec->readBits(k1);
+						// put the corrector back together
+						c = (c << k1) | c1;
+					}
 				}
 
 				// translate c back into its correct interval
@@ -179,7 +206,9 @@ struct IntegerCompressor{
 			}
 		} else {
 			// then c is either 0 or 1
-			c = dec->decodeBit((ArithmeticBitModel*)mCorrector[0]);
+			if(active.thread_rank() == 0){
+				c = dec->decodeBit((ArithmeticBitModel*)mCorrector[0]);
+			}
 		}
 
 		uint64_t t_end = nanotime();

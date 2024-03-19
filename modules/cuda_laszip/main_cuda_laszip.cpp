@@ -26,7 +26,8 @@ CUdeviceptr cptr_lasheader;
 CudaModularProgram* cuda_program = nullptr;
 
 // string lazfile = "E:/dev/pointclouds/archpro/heidentor.laz";
-string lazfile = "E:/resources/pointclouds/archpro/heidentor.laz";
+string lazfile = "E:/dev/pointclouds/ot_35120C7101A_1.laz";
+// string lazfile = "E:/resources/pointclouds/archpro/heidentor.laz";
 int64_t lazByteSize = 0;
 
 void initCuda(){
