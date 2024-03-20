@@ -546,7 +546,7 @@ void rasterizeTriangles(Triangles* triangles, uint64_t* framebuffer, Rasterizati
 	// }
 }
 
-void rasterizeSplat(float3 position, float3 N, float size, uint32_t color, uint64_t* framebuffer, mat4 world){
+void rasterizeDisk(float3 position, float3 N, float size, uint32_t color, uint64_t* framebuffer, mat4 world){
 
 	auto grid = cg::this_grid();
 	auto block = cg::this_thread_block();
@@ -574,18 +574,33 @@ void rasterizeSplat(float3 position, float3 N, float size, uint32_t color, uint6
 	float4 dir_10_worldspace = projToWorld(dir_10_projspace);
 	float4 dir_11_worldspace = projToWorld(dir_11_projspace);
 
+	float3 dir_center = make_float3(
+		0.25f * dir_00_worldspace + 
+		0.25f * dir_01_worldspace + 
+		0.25f * dir_10_worldspace + 
+		0.25f * dir_11_worldspace - origin_worldspace);
+	dir_center = normalize(dir_center);
+	float3 origin = make_float3(origin_worldspace);
+
 	mat4 transform = viewProj * world;
-	float3 T1 = {N.x, N.z, N.y};
-	float3 T2 = {N.z, N.y, N.x};
+	float3 T1 = {N.x, -N.z, N.y};
+	// float3 T2 = {-N.z, N.y, N.x};
+	float3 T2 = cross(N, T1);
+	// float3 T1 = {N.x, N.z, N.y};
+	// float3 T2 = {N.z, N.y, N.x};
 
 	float r = size;
 
 	float3 samples[5] = {
 		position, 
-		float3{position.x + r * (-T1.x + T2.x), position.y + r * (-T1.y + T2.y), position.z + r * (-T1.z + T2.z)},
 		float3{position.x + r * (-T1.x - T2.x), position.y + r * (-T1.y - T2.y), position.z + r * (-T1.z - T2.z)},
-		float3{position.x + r * (+T1.x + T2.x), position.y + r * (+T1.y + T2.y), position.z + r * (+T1.z + T2.z)},
 		float3{position.x + r * (+T1.x - T2.x), position.y + r * (+T1.y - T2.y), position.z + r * (+T1.z - T2.z)},
+		float3{position.x + r * (+T1.x + T2.x), position.y + r * (+T1.y + T2.y), position.z + r * (+T1.z + T2.z)},
+		float3{position.x + r * (-T1.x + T2.x), position.y + r * (-T1.y + T2.y), position.z + r * (-T1.z + T2.z)},
+		// float3{position.x + r * (-T1.x + T2.x), position.y + r * (-T1.y + T2.y), position.z + r * (-T1.z + T2.z)},
+		// float3{position.x + r * (-T1.x - T2.x), position.y + r * (-T1.y - T2.y), position.z + r * (-T1.z - T2.z)},
+		// float3{position.x + r * (+T1.x + T2.x), position.y + r * (+T1.y + T2.y), position.z + r * (+T1.z + T2.z)},
+		// float3{position.x + r * (+T1.x - T2.x), position.y + r * (+T1.y - T2.y), position.z + r * (+T1.z - T2.z)},
 	};
 
 	float2 samples_screen[5];
@@ -623,6 +638,54 @@ void rasterizeSplat(float3 position, float3 N, float size, uint32_t color, uint6
 
 	}
 
+	// DEBUG
+	if(false)
+	for(int U = -5; U <= 5; U++)
+	for(int V = -5; V <= 5; V++)
+	{
+		float u = float(U) / 5.0f;
+		float v = float(V) / 5.0f;
+
+		float3 sample = position + T1 * u * size + T2 * v * size;
+
+		float4 ndc = transform * make_float4(sample, 1.0f);
+		ndc.x = ndc.x / ndc.w;
+		ndc.y = ndc.y / ndc.w;
+		ndc.z = ndc.z / ndc.w;
+
+		if(ndc.w <= 0.0) continue;
+		if(ndc.x < -1.0) continue;
+		if(ndc.x >  1.0) continue;
+		if(ndc.y < -1.0) continue;
+		if(ndc.y >  1.0) continue;
+
+		float2 imgPos = {
+			(ndc.x * 0.5f + 0.5f) * uniforms.width, 
+			(ndc.y * 0.5f + 0.5f) * uniforms.height,
+		};
+
+		float3 o_to_i = origin - sample;
+		float depth = -dot(dir_center, o_to_i);
+		// depth = 100.0f;
+
+		// float depth = t; // TODO
+		uint64_t udepth = *((uint32_t*)&depth);
+
+		// uint64_t pixel = (udepth << 32ull) | index;
+		uint64_t pixel = (udepth << 32ull) | color;
+
+		int2 pixelCoords = make_int2(imgPos.x, imgPos.y);
+		int pixelID = pixelCoords.x + pixelCoords.y * uniforms.width;
+		pixelID = clamp(pixelID, 0, int(uniforms.width * uniforms.height) - 1);
+
+		atomicMin(&framebuffer[pixelID], pixel);
+
+
+
+	}
+
+	// return;
+
 	int safeguard = 0;
 	for(int ix = screen_min.x; ix <= ceil(screen_max.x); ix++)
 	for(int iy = screen_min.y; iy <= ceil(screen_max.y); iy++)
@@ -642,10 +705,12 @@ void rasterizeSplat(float3 position, float3 N, float size, uint32_t color, uint6
 			A_10 * dir_10_worldspace + 
 			A_11 * dir_11_worldspace - origin_worldspace);
 		dir = normalize(dir);
-		float3 origin = make_float3(origin_worldspace);
 
 		// float t = raySphereIntersection(origin, dir, position, size * 0.5f);
-		float t = intersect_plane(origin, dir, N, 0.0f);
+
+		float offset = dot(position, N);
+		// float offset = -position.z;
+		float t = intersect_plane(origin, dir, N, -offset);
 		float3 I = origin + t * dir;
 		float d = length(position - I);
 
@@ -657,7 +722,7 @@ void rasterizeSplat(float3 position, float3 N, float size, uint32_t color, uint6
 		// rgba[2] = 100.0f * t;
 
 		// TODO: ugly hack, why is 
-		float threshold = sqrt(size * size + size * size);
+		// float threshold = sqrt(size * size + size * size);
 		if(d > size){
 			// color = 0x0000ff00;
 			continue;
@@ -666,7 +731,10 @@ void rasterizeSplat(float3 position, float3 N, float size, uint32_t color, uint6
 		}
 
 
-		float depth = 100.0f; // TODO
+		float3 o_to_i = I - origin;
+		float depth = dot(dir_center, o_to_i);
+
+		// float depth = t; // TODO
 		uint64_t udepth = *((uint32_t*)&depth);
 
 		// uint64_t pixel = (udepth << 32ull) | index;
@@ -685,45 +753,6 @@ void rasterizeSplat(float3 position, float3 N, float size, uint32_t color, uint6
 	}
 
 	break_target:
-
-
-	// for(float3 sample : samples){
-
-	// 	mat4 transform = viewProj * world;
-
-	// 	float4 ndc = transform * make_float4(sample, 1.0f);
-	// 	ndc.x = ndc.x / ndc.w;
-	// 	ndc.y = ndc.y / ndc.w;
-	// 	ndc.z = ndc.z / ndc.w;
-
-	// 	if(ndc.w <= 0.0) return;
-	// 	if(ndc.x < -1.0) return;
-	// 	if(ndc.x >  1.0) return;
-	// 	if(ndc.y < -1.0) return;
-	// 	if(ndc.y >  1.0) return;
-
-	// 	float2 imgPos = {
-	// 		(ndc.x * 0.5f + 0.5f) * uniforms.width, 
-	// 		(ndc.y * 0.5f + 0.5f) * uniforms.height,
-	// 	};
-
-	// 	uint8_t* rgba = (uint8_t*)&color;
-
-	// 	float depth = ndc.w;
-	// 	uint64_t udepth = *((uint32_t*)&depth);
-
-	// 	// uint64_t pixel = (udepth << 32ull) | index;
-	// 	uint64_t pixel = (udepth << 32ull) | color;
-
-	// 	int2 pixelCoords = make_int2(imgPos.x, imgPos.y);
-	// 	int pixelID = pixelCoords.x + pixelCoords.y * uniforms.width;
-	// 	pixelID = clamp(pixelID, 0, int(uniforms.width * uniforms.height) - 1);
-
-	// 	atomicMin(&framebuffer[pixelID], pixel);
-
-	// }
-
-
 
 }
 
@@ -1168,20 +1197,41 @@ void kernel(
 	if(grid.thread_rank() < 10'000)
 	{
 
+		auto sample = [](float u, float v){
+			return float3{
+				10.0f * u - 5.0f,
+				10.0f * v - 25.0f + 22,
+				0.91f * sin(10.0f * u) * cos(10.0f * v),
+			};
+		};
+
 		float u = float(grid.thread_rank() % 100) / 100.0f;
 		float v = (float(grid.thread_rank()) / 100.0f) / 100.0f;
 
-		float x = 10.0f * u - 5.0f;
-		float y = 10.0f * v - 25.0f + 22;
-		float z = 0.0f;
+		// float x = 10.0f * u - 5.0f;
+		// float y = 10.0f * v - 25.0f + 22;
+		// // float z = 0.91f * sin(10.0f * u) * cos(10.0f * v);
+		// float z = 0.0f;
+
+		float3 pos = sample(u, v);
+
+		float3 p_10 = sample(u + 0.00001f, v + 0.00000f);
+		float3 p_01 = sample(u + 0.00000f, v + 0.00001f);
+
+		float3 d_10 = p_10 - pos;
+		float3 d_01 = p_01 - pos;
+		float3 N = normalize(cross(d_10, d_01));
 
 		mat4 world = mat4::identity();
 
 		uint32_t color = grid.thread_rank() * 1234567;
 
-		rasterizeSplat({x, y, z}, {0.0f, 0.0f, 1.0f}, 0.04f, color, framebuffer_2, world);
+		// float3 N = normalize(float3{sin(uniforms.time), 0.0f, 1.0f});
+		// N = {0.0f, 0.0f, 1.0f};
 
 
+		
+		rasterizeDisk(pos, N, 0.045f, color, framebuffer_2, world);
 	}
 
 	grid.sync();

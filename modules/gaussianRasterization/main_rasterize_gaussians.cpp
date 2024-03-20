@@ -292,10 +292,17 @@ int main(){
 	auto renderer = make_shared<GLRenderer>();
 
 	// position: -0.9744237992110044, 1.5045242783687351, -3.1074736490284622 
-	renderer->controls->yaw    = -0.175;
-	renderer->controls->pitch  = 1.565;
-	renderer->controls->radius = 6.210;
-	renderer->controls->target = { 0.107, 1.540, 3.007, };
+	// renderer->controls->yaw    = -0.175;
+	// renderer->controls->pitch  = 1.565;
+	// renderer->controls->radius = 6.210;
+	// renderer->controls->target = { 0.107, 1.540, 3.007, };
+
+	// position: 4.29389881857022, 3.2099701917783916, -0.32908523255811645 
+	renderer->controls->yaw    = -4.310;
+	renderer->controls->pitch  = -0.397;
+	renderer->controls->radius = 4.242;
+	renderer->controls->target = { 0.391, 1.678, 0.314, };
+
 
 
 	model = loadGaussianSplats(path);
